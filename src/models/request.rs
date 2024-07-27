@@ -56,19 +56,17 @@ impl DoxbinAccount {
         Ok(response.status().as_u16() as usize)
     }
 
-    async fn post(&mut self, url: &str, body: &Value) -> Result<bool, Error> {
+    async fn post(&mut self, url: &str, body: &Value) -> Result<(), Error> {
         let mut request = self.client.post(url).headers(self.headers.clone()).json(body);
         if let Some(cookie_header) = self.get_cookie_header(url) {
             request = request.header(reqwest::header::COOKIE, cookie_header);
         }
         let response = request.send().await?;
-        let mut success = false;
         {
             let mut jar = self.cookie_jar.lock().unwrap();
             for cookie in response.headers().get_all(reqwest::header::SET_COOKIE).iter() {
                 if let Ok(cookie_str) = cookie.to_str() {
                     if let Ok(parsed_cookie) = Cookie::parse(cookie_str.to_string()) {
-                        if parsed_cookie.name().contains("doxbin_session") {success = true}
                         jar.add(parsed_cookie);
                     }
                 }
@@ -76,7 +74,7 @@ impl DoxbinAccount {
         }
 
 
-        Ok(success)
+        Ok(())
     }
 
     fn print_cookies(&self, message: &str) {
