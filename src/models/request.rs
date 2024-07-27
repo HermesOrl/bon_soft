@@ -1,14 +1,8 @@
-use reqwest::{Client, Url};
-use reqwest::cookie::{CookieStore, Jar};
-use reqwest::Error;
-use reqwest::header::{HeaderMap, COOKIE};
-
-use serde_json::Value;
+use reqwest::{Client, Error, header::HeaderMap};
 use cookie::{Cookie, CookieJar};
-use std::fs;
-use std::path::Path;
-use std::error::Error as StdError;
 use std::sync::{Arc, Mutex};
+use serde_json::Value;
+
 pub struct DoxbinAccount {
     client: Client,
     cookie_jar: Arc<Mutex<CookieJar>>,
@@ -17,16 +11,15 @@ pub struct DoxbinAccount {
 
 impl DoxbinAccount {
     pub fn new() -> Self {
-        let cookie_jar = Arc::new(Jar::default());
-        let client = Client::builder()
-            // .cookie_store(true)
-            .build()
-            .expect("Failed to build client");
+        let client = Client::builder().build().expect("Failed to build client");
 
         DoxbinAccount {
-            client,headers: HeaderMap::new(), cookie_jar: Arc::new(Mutex::new(CookieJar::new())),
+            client,
+            headers: HeaderMap::new(),
+            cookie_jar: Arc::new(Mutex::new(CookieJar::new())),
         }
     }
+
     fn get_cookie_header(&self, url: &str) -> Option<String> {
         let jar = self.cookie_jar.lock().unwrap();
         let url = reqwest::Url::parse(url).expect("Invalid URL");
@@ -37,18 +30,14 @@ impl DoxbinAccount {
             .map(|cookie| format!("{}={}", cookie.name(), cookie.value()))
             .collect::<Vec<_>>()
             .join("; ");
-        if cookies.is_empty() {
-            None
-        } else {
-            Some(cookies)
-        }
+        if cookies.is_empty() { None } else { Some(cookies) }
     }
+
     pub async fn get(&mut self, url: &str) -> Result<usize, Error> {
-        println!("{}",url);
+        println!("{}", url);
         self.print_cookies("ДО ВЫПОЛНЕНИЯ запроса");
 
-        let mut request = self.client.get(url)
-            .headers(self.headers.clone());
+        let mut request = self.client.get(url).headers(self.headers.clone());
 
         if let Some(cookie_header) = self.get_cookie_header(url) {
             request = request.header(reqwest::header::COOKIE, cookie_header);
@@ -67,36 +56,23 @@ impl DoxbinAccount {
             }
         }
 
-        // for (key, value) in response.headers().iter() {
-        //     self.headers.insert(key.clone(), value.clone());
-        // }
-
         self.print_cookies("После запроса");
 
         Ok(response.status().as_u16() as usize)
-    }
-    fn print_cookies(&self, message: &str) {
-        let jar = self.cookie_jar.lock().unwrap();
-        for cookie in jar.iter() {
-            println!("{}: name={}, value={}, domain={}, expires={:?}",
-                     message,
-                     cookie.name(),
-                     cookie.value(),
-                     cookie.domain().unwrap_or(""),
-                     cookie.expires());
-        }
     }
 
     pub async fn post(&mut self, url: &str, body: &Value) -> Result<usize, Error> {
-        println!("{}",url);
+        println!("{}", url);
         self.print_cookies("ДО ВЫПОЛНЕНИЯ запроса");
-        let mut request = self.client.post(url)
-            .headers(self.headers.clone())
-            .json(body);
+
+        let mut request = self.client.post(url).headers(self.headers.clone()).json(body);
+
         if let Some(cookie_header) = self.get_cookie_header(url) {
             request = request.header(reqwest::header::COOKIE, cookie_header);
         }
+
         let response = request.send().await?;
+
         {
             let mut jar = self.cookie_jar.lock().unwrap();
             for cookie in response.headers().get_all(reqwest::header::SET_COOKIE).iter() {
@@ -107,8 +83,23 @@ impl DoxbinAccount {
                 }
             }
         }
+
         self.print_cookies("После запроса");
+
         Ok(response.status().as_u16() as usize)
     }
-}
 
+    fn print_cookies(&self, message: &str) {
+        let jar = self.cookie_jar.lock().unwrap();
+        for cookie in jar.iter() {
+            println!(
+                "{}: name={}, value={}, domain={}, expires={:?}",
+                message,
+                cookie.name(),
+                cookie.value(),
+                cookie.domain().unwrap_or(""),
+                cookie.expires()
+            );
+        }
+    }
+}
