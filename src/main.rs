@@ -7,6 +7,6 @@ use models::request;
 async fn main() {
     println!("Hello, world!");
     let mut dox_acc = request::DoxbinAccount::new();
-    let response = dox_acc.get(&"").await;
-    println!("Response: {:?}", response);
+    let response = dox_acc.get(&"https://doxbin.org/").await;
+    let response = dox_acc.get(&"https://doxbin.org/.well-known/ddos-guard/check?context=free_splash").await;
 }

@@ -30,6 +30,7 @@ impl DoxbinAccount {
 
         for (key, value) in response.headers().iter() {
             self.headers.insert(key,value.clone());
+            println!()
         }
         if let Ok(parsed_url) = Url::parse(url) {
             let cookies = self.cookie_jar.cookies(&parsed_url);
