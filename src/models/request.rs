@@ -6,6 +6,8 @@ use std::sync::{Arc, Mutex};
 use serde::de::StdError;
 use serde_json::Value;
 use super::XSRF_TOKEN_LINKS;
+use dotenv::dotenv;
+use std::env;
 
 pub struct DoxbinAccount {
     client: Client,
@@ -123,4 +125,19 @@ fn read_json_from_file<P: AsRef<Path>>(path: P) -> Result<Value, Box<dyn StdErro
     let data = fs::read_to_string(path)?;
     let json: Value = serde_json::from_str(&data)?;
     Ok(json)
+}
+
+struct Captcha {
+    api_key: String,
+    data_site_key: String,
+}
+
+impl Captcha {
+    fn new() -> Self {
+        dotenv().ok();
+        Captcha {
+            api_key: env::var("API2CAPTCHA").expect("API2CAPTCHA NOT FOUND").to_string(),
+            data_site_key: "c902269c-b6ad-4309-b393-c8c9fd010011".to_string(),
+        }
+    }
 }
