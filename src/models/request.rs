@@ -137,7 +137,7 @@ impl DoxbinAccount {
         self.check_xsrf_token()
     }
 
-    pub async fn create_account(&mut self) -> Option<()> {
+    pub async fn create_account(&mut self) -> Option<(String, String)> {
         if self.generate_xsrf_token().await.is_some() {
             if let Ok((status, text)) = self.get("https://doxbin.org/register").await {
                 let re = Regex::new(r#"<input type="hidden" name="_token" value="([^"]+)""#).expect("Failed to create regex");
@@ -157,8 +157,8 @@ impl DoxbinAccount {
                             "hcaptcha_token": _code,
                         });
                         if let resp_code = self.post("https://doxbin.org/register", &json_payload).await.expect("TODO: panic message") == 200 {
-                            println!("{}:{}", snm, pswd);
-                            return Some(());
+                            // println!("{}:{}", snm, pswd);
+                            return Some((snm, pswd));
                         }
                     }
                 }
