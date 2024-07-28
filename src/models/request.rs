@@ -16,16 +16,16 @@ use tokio::time::{sleep, Duration};
 use regex::Regex;
 
 pub struct DoxbinAccount {
-    client: Client,
+    client: Arc<Client>,
     cookie_jar: Arc<Mutex<CookieJar>>,
     headers: HeaderMap,
     captcha_client: Captcha
 }
 
 impl DoxbinAccount {
-    pub fn new() -> Self {
+    pub fn new(client: Arc<Client>) -> Self {
 
-        let client = Client::builder().build().expect("Failed to build client");
+        // let client = Client::builder().build().expect("Failed to build client");
 
         DoxbinAccount {
             client,
