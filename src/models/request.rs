@@ -48,7 +48,7 @@ impl DoxbinAccount {
         if cookies.is_empty() { None } else { Some(cookies) }
     }
 
-    async fn get(&mut self, url: &str) -> Result<(usize, String), Error> {
+    async fn get(&self, url: &str) -> Result<(usize, String), Error> {
         // if url == "https://doxbin.org/register" {
         //     self.print_cookies("DO");
         // }
@@ -74,7 +74,7 @@ impl DoxbinAccount {
         Ok(rtrn)
     }
 
-    async fn post(&mut self, url: &str, body: &Value) -> Result<usize, Error> {
+    async fn post(&self, url: &str, body: &Value) -> Result<usize, Error> {
         let mut request = self.client.post(url).headers(self.headers.clone()).json(body);
         if let Some(cookie_header) = self.get_cookie_header(url) {
             request = request.header(reqwest::header::COOKIE, cookie_header);
@@ -117,7 +117,7 @@ impl DoxbinAccount {
         }
         None
     }
-    pub async fn generate_xsrf_token(&mut self) -> Option<()> {
+    pub async fn generate_xsrf_token(&self) -> Option<()> {
         for link in XSRF_TOKEN_LINKS.iter() {
             self.get(link.clone()).await.expect("TODO: panic message");
         }
@@ -138,7 +138,7 @@ impl DoxbinAccount {
         self.check_xsrf_token()
     }
 
-    pub async fn create_account(&mut self) -> Option<(String, String)> {
+    pub async fn create_account(&self) -> Option<(String, String)> {
         if self.generate_xsrf_token().await.is_some() {
             if let Ok((status, text)) = self.get("https://doxbin.org/register").await {
                 let re = Regex::new(r#"<input type="hidden" name="_token" value="([^"]+)""#).expect("Failed to create regex");
@@ -190,7 +190,7 @@ impl Captcha {
         }
     }
 
-    pub async fn get_code(&self, task_id: usize) -> Option<String> {
+    async fn get_code(&self, task_id: usize) -> Option<String> {
         let apikey = self.api_key.clone();
         let client = Client::builder().build().expect("Failed to build client captcha GET_CODE");
         let mut json_payload = json!({
