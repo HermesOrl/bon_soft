@@ -1,13 +1,18 @@
 use std::{fs, io};
 use std::path::Path;
-use reqwest::{Client, Error, header::HeaderMap};
+use reqwest::{Client, Error, get, header::HeaderMap};
 use cookie::{Cookie, CookieJar};
 use std::sync::{Arc, Mutex};
 use serde::de::StdError;
-use serde_json::Value;
+use serde::{Deserialize, Serialize};
+use serde_json::{json, Value};
 use super::XSRF_TOKEN_LINKS;
+use super::enums::{ApiCaptchaResponseGetCode, Payload, read_json_from_file_captcha, ApiCaptchaResponse};
 use dotenv::dotenv;
 use std::env;
+use std::io::Read;
+use tokio::time::{sleep, Duration};
+use regex::Regex;
 
 pub struct DoxbinAccount {
     client: Client,
@@ -39,7 +44,10 @@ impl DoxbinAccount {
         if cookies.is_empty() { None } else { Some(cookies) }
     }
 
-    async fn get(&mut self, url: &str) -> Result<usize, Error> {
+    async fn get(&mut self, url: &str) -> Result<(usize, String), Error> {
+        if url == "https://doxbin.org/register" {
+            self.print_cookies("DO");
+        }
         let mut request = self.client.get(url).headers(self.headers.clone());
         if let Some(cookie_header) = self.get_cookie_header(url) {
             request = request.header(reqwest::header::COOKIE, cookie_header);
@@ -55,7 +63,11 @@ impl DoxbinAccount {
                 }
             }
         }
-        Ok(response.status().as_u16() as usize)
+        if url == "https://doxbin.org/register" {
+            self.print_cookies("POSLE");
+        }
+        let rtrn =( response.status().as_u16() as usize, response.text().await?);
+        Ok(rtrn)
     }
 
     async fn post(&mut self, url: &str, body: &Value) -> Result<(), Error> {
@@ -120,6 +132,20 @@ impl DoxbinAccount {
         // self.print_cookies("asd");
         self.check_xsrf_token()
     }
+
+    pub async fn create_account(&mut self) -> Option<()> {
+        if self.generate_xsrf_token().await.is_some() {
+            if let Ok((status, text)) = self.get("https://doxbin.org/register").await {
+                let re = Regex::new(r#"<input type="hidden" name="_token" value="([^"]+)""#).expect("Failed to create regex");
+                if let Some(captures) = re.captures(&text) {
+                    if let Some(value) = captures.get(1) {
+                        println!("Token value: {}", value.as_str());
+                    }
+                }
+            }
+        }
+        None
+    }
 }
 fn read_json_from_file<P: AsRef<Path>>(path: P) -> Result<Value, Box<dyn StdError>> {
     let data = fs::read_to_string(path)?;
@@ -127,17 +153,96 @@ fn read_json_from_file<P: AsRef<Path>>(path: P) -> Result<Value, Box<dyn StdErro
     Ok(json)
 }
 
-struct Captcha {
-    api_key: String,
-    data_site_key: String,
+
+
+pub struct Captcha {
+    pub api_key: String,
+    pub data_site_key: String,
 }
 
 impl Captcha {
-    fn new() -> Self {
+    pub fn new() -> Self {
         dotenv().ok();
         Captcha {
             api_key: env::var("API2CAPTCHA").expect("API2CAPTCHA NOT FOUND").to_string(),
             data_site_key: "c902269c-b6ad-4309-b393-c8c9fd010011".to_string(),
         }
+    }
+
+    pub async fn get_code(&self, task_id: usize) -> Option<String> {
+        let apikey = self.api_key.clone();
+        let client = Client::builder().build().expect("Failed to build client captcha GET_CODE");
+        let mut json_payload = json!({
+            "clientKey": apikey,
+            "taskId": task_id,
+        });
+        for i in 0..20 {
+            let response = client.post("https://api.2captcha.com/getTaskResult")
+                .json(&json_payload)
+                .send().await.expect("Failed to send request get code");
+
+            let response_json: Value = response.json().await.expect("Failed to parse response JSON");
+            // println!("{:?}", response_json);
+            match serde_json::from_value::<ApiCaptchaResponseGetCode>(response_json.clone()) {
+                Ok(api_response) => {
+                    match api_response {
+                        ApiCaptchaResponseGetCode::Processing { common } => {
+                            // println!("Processing: errorId: {}, status: {}", common.errorId, common.status);
+                            sleep(Duration::from_secs(5)).await;
+                        },
+                        ApiCaptchaResponseGetCode::Error { common, errorCode, errorDescription } => {
+                            // println!("Error: errorId: {}, status: {}, errorCode: {}, errorDescription: {}", common.errorId, common.status, errorCode, errorDescription);
+                            break
+                        },
+                        ApiCaptchaResponseGetCode::Ready { common, solution, cost, ip, createTime, endTime, solveCount } => {
+                            // println!("Ready: errorId: {}, status: {}, solution: {:?}, cost: {}, ip: {}, createTime: {}, endTime: {}, solveCount: {}",
+                            //          common.errorId, common.status, solution, cost, ip, createTime, endTime, solveCount);
+                            if let Some(g_recaptcha_response) = solution.get("gRecaptchaResponse").and_then(|v| v.as_str()) {
+                                return Some(g_recaptcha_response.to_string());
+                            }
+                            break;
+                        },
+                    }
+                }
+                Err(e) => {
+                    eprintln!("Failed to deserialize JSON to ApiResponse: {}", e);
+                    break;
+                }
+            }
+        }
+        None
+    }
+    pub async fn get_token(&self) -> Option<String> {
+
+        let mut json_payload: Payload = match read_json_from_file_captcha("payload_create_captcha.json") {
+            Ok(payload) => payload,
+            Err(e) => {
+                eprintln!("Error reading JSON payload captcha: {}", e);
+                return None;
+            }
+        };
+        json_payload.clientKey = self.api_key.to_string();
+        json_payload.task.websiteURL = "doxbin.org".to_string();
+        json_payload.task.websiteKey = self.data_site_key.to_string();
+
+        let client = Client::builder().build().expect("Failed to build client captcha");
+        let response = client.post("https://api.2captcha.com/createTask")
+            .json(&json_payload)
+            .send()
+            .await.expect("TODO: Captcha create panic");
+        match response.json::<ApiCaptchaResponse>().await {
+            Ok(response_json) => {
+                println!("{:?}", response_json.taskId);
+                if let Some(_code_captcha) = self.get_code(response_json.taskId as usize).await {
+                    println!("{:?}", _code_captcha);
+                    return Some(_code_captcha);
+                }
+            }
+            Err(e) => {
+                eprintln!("Failed to parse response JSON: {}", e);
+            }
+        }
+        None
+
     }
 }
