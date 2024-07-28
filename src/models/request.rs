@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use super::XSRF_TOKEN_LINKS;
 use super::enums::{ApiCaptchaResponseGetCode, Payload, read_json_from_file_captcha, ApiCaptchaResponse};
+use super::config::{generate_password, generate_username};
 use dotenv::dotenv;
 use std::env;
 use std::io::Read;
@@ -18,6 +19,7 @@ pub struct DoxbinAccount {
     client: Client,
     cookie_jar: Arc<Mutex<CookieJar>>,
     headers: HeaderMap,
+    captcha_client: Captcha
 }
 
 impl DoxbinAccount {
@@ -28,6 +30,7 @@ impl DoxbinAccount {
             client,
             headers: HeaderMap::new(),
             cookie_jar: Arc::new(Mutex::new(CookieJar::new())),
+            captcha_client: Captcha::new(),
         }
     }
 
@@ -45,9 +48,9 @@ impl DoxbinAccount {
     }
 
     async fn get(&mut self, url: &str) -> Result<(usize, String), Error> {
-        if url == "https://doxbin.org/register" {
-            self.print_cookies("DO");
-        }
+        // if url == "https://doxbin.org/register" {
+        //     self.print_cookies("DO");
+        // }
         let mut request = self.client.get(url).headers(self.headers.clone());
         if let Some(cookie_header) = self.get_cookie_header(url) {
             request = request.header(reqwest::header::COOKIE, cookie_header);
@@ -63,19 +66,20 @@ impl DoxbinAccount {
                 }
             }
         }
-        if url == "https://doxbin.org/register" {
-            self.print_cookies("POSLE");
-        }
+        // if url == "https://doxbin.org/register" {
+        //     self.print_cookies("POSLE");
+        // }
         let rtrn =( response.status().as_u16() as usize, response.text().await?);
         Ok(rtrn)
     }
 
-    async fn post(&mut self, url: &str, body: &Value) -> Result<(), Error> {
+    async fn post(&mut self, url: &str, body: &Value) -> Result<usize, Error> {
         let mut request = self.client.post(url).headers(self.headers.clone()).json(body);
         if let Some(cookie_header) = self.get_cookie_header(url) {
             request = request.header(reqwest::header::COOKIE, cookie_header);
         }
         let response = request.send().await?;
+        // println!("{}", response.status());
         {
             let mut jar = self.cookie_jar.lock().unwrap();
             for cookie in response.headers().get_all(reqwest::header::SET_COOKIE).iter() {
@@ -88,7 +92,7 @@ impl DoxbinAccount {
         }
 
 
-        Ok(())
+        Ok((response.status().as_u16() as usize))
     }
 
     fn print_cookies(&self, message: &str) {
@@ -139,7 +143,23 @@ impl DoxbinAccount {
                 let re = Regex::new(r#"<input type="hidden" name="_token" value="([^"]+)""#).expect("Failed to create regex");
                 if let Some(captures) = re.captures(&text) {
                     if let Some(value) = captures.get(1) {
-                        println!("Token value: {}", value.as_str());
+                        let _token = value.as_str();
+                        let _code = self.captcha_client.get_token().await.unwrap_or_default();
+                        // println!("Token value: {}", _token);
+                        let pswd = generate_password();
+                        let snm = generate_username();
+                        let json_payload = json!({
+                            "username": snm,
+                            "email": "",
+                            "password": pswd,
+                            "confpass": pswd,
+                            "_token": _token,
+                            "hcaptcha_token": _code,
+                        });
+                        if let resp_code = self.post("https://doxbin.org/register", &json_payload).await.expect("TODO: panic message") == 200 {
+                            println!("{}:{}", snm, pswd);
+                            return Some(());
+                        }
                     }
                 }
             }
@@ -234,7 +254,7 @@ impl Captcha {
             Ok(response_json) => {
                 println!("{:?}", response_json.taskId);
                 if let Some(_code_captcha) = self.get_code(response_json.taskId as usize).await {
-                    println!("{:?}", _code_captcha);
+                    // println!("{:?}", _code_captcha);
                     return Some(_code_captcha);
                 }
             }
