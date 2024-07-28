@@ -7,11 +7,12 @@ use serde::de::StdError;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use super::XSRF_TOKEN_LINKS;
-use super::enums::{ApiCaptchaResponseGetCode, Payload, read_json_from_file_captcha, ApiCaptchaResponse};
+use super::enums::{ApiCaptchaResponseGetCode, Payload, read_json_from_file_captcha, ApiCaptchaResponse, DoxBinAccount, DoxBinAccountSession};
 use super::config::{generate_password, generate_username};
 use dotenv::dotenv;
 use std::env;
-use std::io::Read;
+use std::fs::File;
+use std::io::{BufRead, BufReader, Read};
 use tokio::time::{sleep, Duration};
 use regex::Regex;
 
@@ -19,7 +20,8 @@ pub struct DoxbinAccount {
     client: Arc<Client>,
     cookie_jar: Arc<Mutex<CookieJar>>,
     headers: HeaderMap,
-    captcha_client: Captcha
+    captcha_client: Captcha,
+    accounts_storage: Vec<DoxBinAccount>
 }
 
 impl DoxbinAccount {
@@ -29,6 +31,7 @@ impl DoxbinAccount {
             headers: HeaderMap::new(),
             cookie_jar: Arc::new(Mutex::new(CookieJar::new())),
             captcha_client: Captcha::new(),
+            accounts_storage: Vec::new(),
         }
     }
 
@@ -175,6 +178,51 @@ impl DoxbinAccount {
             }
         }
         None
+    }
+
+    pub fn load_from_file(&mut self) -> Option<(i32, i32)> {
+        let file = File::open("./results.txt");
+        let file = match file {
+            Ok(file) => file,
+            Err(_) => return None,
+        };
+        let reader = BufReader::new(file);
+
+        let mut accs_count = 0;
+        let mut accs_count_with_session = 0;
+
+        for line in reader.lines() {
+            let line = match line {
+                Ok(line) => line,
+                Err(_) => return None,
+            };
+            let mut login = String::new();
+            let mut password = String::new();
+            let mut session: DoxBinAccountSession = DoxBinAccountSession::WithoutSession;
+            if line.contains(':') {
+                accs_count += 1;
+                let cloned_line = line.clone();
+                let parts: Vec<&str> = cloned_line.split(":").collect();
+                login = parts[0].trim().to_string();
+                password = parts[1].trim().to_string();
+
+            }
+            if line.contains('\t') {
+                let cloned_line = line.clone();
+                let parts: Vec<&str> = cloned_line.split("\t").collect();
+                accs_count_with_session += 1;
+                session = DoxBinAccountSession::WithSession {session_str: parts[1].trim().to_string()}
+            }
+            self.accounts_storage.push(DoxBinAccount{login, password, session})
+        }
+        self.print_storage();
+        Some((accs_count, accs_count_with_session))
+    }
+
+    fn print_storage(&self) {
+        for i in &self.accounts_storage {
+            println!("{}:{}\t{:?}", i.login, i.password,i.session)
+        }
     }
 }
 fn read_json_from_file<P: AsRef<Path>>(path: P) -> Result<Value, Box<dyn StdError>> {

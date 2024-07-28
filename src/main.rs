@@ -11,8 +11,15 @@ use tokio::sync::mpsc;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn StdError>> {
-
-    threads_reg().await
+    let client = Arc::new(Client::builder()
+        .build()
+        .expect("Failed to build client"));
+    let mut dox_acc = request::DoxbinAccount::new(client);
+    if let Some((total_count, session_count)) = dox_acc.load_from_file() {
+        println!("{total_count}, {session_count}");
+    }
+    Ok(())
+    // threads_reg().await
 }
 
 async fn threads_reg() -> Result<(), Box<dyn StdError>> {

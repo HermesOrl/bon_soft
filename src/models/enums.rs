@@ -68,3 +68,15 @@ pub struct PayloadCaptchaSend {
     pub clientKey: String,
     pub taskId: u64,
 }
+
+#[derive(Debug)]
+pub enum DoxBinAccountSession {
+    WithSession { session_str: String },
+    WithoutSession,
+}
+
+pub struct DoxBinAccount {
+    pub login: String,
+    pub password: String,
+    pub session: DoxBinAccountSession,
+}
