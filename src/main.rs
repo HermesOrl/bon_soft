@@ -20,6 +20,7 @@ async fn main() -> Result<(), Box<dyn StdError>> {
     ));
 
     let mut handles = vec![];
+
     for thread_id in 0..num_tasks {
         let file_clone = Arc::clone(&file);
         let handle = task::spawn(async move {

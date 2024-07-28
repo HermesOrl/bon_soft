@@ -24,6 +24,7 @@ pub struct DoxbinAccount {
 
 impl DoxbinAccount {
     pub fn new() -> Self {
+
         let client = Client::builder().build().expect("Failed to build client");
 
         DoxbinAccount {
