@@ -24,9 +24,6 @@ pub struct DoxbinAccount {
 
 impl DoxbinAccount {
     pub fn new(client: Arc<Client>) -> Self {
-
-        // let client = Client::builder().build().expect("Failed to build client");
-
         DoxbinAccount {
             client,
             headers: HeaderMap::new(),
@@ -74,26 +71,29 @@ impl DoxbinAccount {
         Ok(rtrn)
     }
 
-    async fn post(&self, url: &str, body: &Value) -> Result<usize, Error> {
+    async fn post(&self, url: &str, body: &Value) -> Result<(usize, String), Error> {
         let mut request = self.client.post(url).headers(self.headers.clone()).json(body);
         if let Some(cookie_header) = self.get_cookie_header(url) {
             request = request.header(reqwest::header::COOKIE, cookie_header);
         }
         let response = request.send().await?;
-        // println!("{}", response.status());
+        let mut session_value = String::new();
         {
             let mut jar = self.cookie_jar.lock().unwrap();
             for cookie in response.headers().get_all(reqwest::header::SET_COOKIE).iter() {
                 if let Ok(cookie_str) = cookie.to_str() {
                     if let Ok(parsed_cookie) = Cookie::parse(cookie_str.to_string()) {
-                        jar.add(parsed_cookie);
+                        jar.add(parsed_cookie.clone());
+                        if parsed_cookie.name() == "session" {
+                            session_value = parsed_cookie.value().to_string(); // Сохраняем значение
+                        }
                     }
                 }
             }
         }
 
 
-        Ok((response.status().as_u16() as usize))
+        Ok((response.status().as_u16() as usize, session_value))
     }
 
     fn print_cookies(&self, message: &str) {
@@ -141,7 +141,7 @@ impl DoxbinAccount {
         self.check_xsrf_token()
     }
 
-    pub async fn create_account(&self) -> Option<(String, String)> {
+    pub async fn create_account(&self) -> Option<(String, String, String)> {
         if self.generate_xsrf_token().await.is_some() {
             if let Ok((status, text)) = self.get("https://doxbin.org/register").await {
                 let re = Regex::new(r#"<input type="hidden" name="_token" value="([^"]+)""#).expect("Failed to create regex");
@@ -160,9 +160,15 @@ impl DoxbinAccount {
                             "_token": _token,
                             "hcaptcha_token": _code,
                         });
-                        if let resp_code = self.post("https://doxbin.org/register", &json_payload).await.expect("TODO: panic message") == 200 {
-                            println!("{}:{}", snm, pswd);
-                            return Some((snm, pswd));
+                        match self.post("https://doxbin.org/register", &json_payload).await {
+                            Ok((resp_code, _message)) if resp_code == 200 => {
+                                println!("{}:{}\tSession: {}", snm, pswd, _message);
+                                return Some((snm, pswd, _message));
+                            }
+                            Err(e) => {
+                                eprintln!("Error match get session {:?}", e)
+                            }
+                            _ => {}
                         }
                     }
                 }

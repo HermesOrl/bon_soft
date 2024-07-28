@@ -12,7 +12,7 @@ use tokio::sync::mpsc;
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn StdError>> {
 
-    threads_reg()
+    threads_reg().await
 }
 
 async fn threads_reg() -> Result<(), Box<dyn StdError>> {
@@ -25,7 +25,7 @@ async fn threads_reg() -> Result<(), Box<dyn StdError>> {
     //     }
     // }
     // Ok(())
-    let num_tasks = 60;
+    let num_tasks = 10;
     let (tx, mut rx) = mpsc::channel(100);
     let file = Arc::new(Mutex::new(
         OpenOptions::new()
@@ -37,11 +37,11 @@ async fn threads_reg() -> Result<(), Box<dyn StdError>> {
 
     let file_clone = Arc::clone(&file);
     let write_handle = task::spawn(async move {
-        while let Some((username, password)) = rx.recv().await {
+        while let Some((username, password, session)) = rx.recv().await {
             let file_clone = Arc::clone(&file_clone);
             spawn_blocking(move || {
                 let mut file = file_clone.lock().unwrap();
-                writeln!(file, "{}:{}", username, password).expect("Unable to write to file");
+                writeln!(file, "{}:{}\t{}", username, password, session).expect("Unable to write to file");
             }).await.expect("Failed to write to file");
         }
     });
@@ -61,9 +61,9 @@ async fn threads_reg() -> Result<(), Box<dyn StdError>> {
                 let handle = task::spawn(async move {
                     let mut dox_acc = request::DoxbinAccount::new(client_clone);
                     match dox_acc.create_account().await {
-                        Some((username, password)) => {
-                            println!("[{}] Create acc\t{}:{}", thread_id, username, password);
-                            tx_clone.send((username, password)).await.expect("Failed to send result");
+                        Some((username, password, session)) => {
+                            println!("[{}] Create acc\t{}:{}\tSession: {}", thread_id, username, password, session);
+                            tx_clone.send((username, password, session)).await.expect("Failed to send result");
                         }
                         None => eprintln!("[{}] Not create acc", thread_id),
                     }
