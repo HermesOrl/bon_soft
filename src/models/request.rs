@@ -119,7 +119,10 @@ impl DoxbinAccount {
     }
     pub async fn generate_xsrf_token(&self) -> Option<()> {
         for link in XSRF_TOKEN_LINKS.iter() {
-            self.get(link.clone()).await.expect("TODO: panic message");
+            match self.get(link.clone()).await {
+                Ok(_) => {}
+                Err(_) => { return None }
+            }
         }
         let json_payload = match read_json_from_file("payload.json") {
             Ok(payload) => payload,
@@ -146,7 +149,7 @@ impl DoxbinAccount {
                     if let Some(value) = captures.get(1) {
                         let _token = value.as_str();
                         let _code = self.captcha_client.get_token().await.unwrap_or_default();
-                        // println!("Token value: {}", _token);
+                        println!("Token value: {}", _token);
                         let pswd = generate_password();
                         let snm = generate_username();
                         let json_payload = json!({
@@ -158,7 +161,7 @@ impl DoxbinAccount {
                             "hcaptcha_token": _code,
                         });
                         if let resp_code = self.post("https://doxbin.org/register", &json_payload).await.expect("TODO: panic message") == 200 {
-                            // println!("{}:{}", snm, pswd);
+                            println!("{}:{}", snm, pswd);
                             return Some((snm, pswd));
                         }
                     }

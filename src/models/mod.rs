@@ -11,3 +11,4 @@ pub const XSRF_TOKEN_LINKS: [&str; 4] = [
     "https://check.ddos-guard.net/set/id/T5q8bswinyHijR3O"];
 
 
+pub mod proxy;
