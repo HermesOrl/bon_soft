@@ -8,16 +8,30 @@ use std::fs::OpenOptions;
 use std::io::Write;
 use tokio::task::spawn_blocking;
 use tokio::sync::mpsc;
+use crate::models::enums::DoxBinAccountGetXsrf;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn StdError>> {
     let client = Arc::new(Client::builder()
+        .pool_max_idle_per_host(50)
         .build()
-        .expect("Failed to build client"));
-    let mut dox_acc = request::DoxbinAccount::new(client);
-    if let Some((total_count, session_count)) = dox_acc.load_from_file() {
-        println!("{total_count}, {session_count}");
-    }
+        .expect("Failed to build client auth doxbin storage"));
+    let client_clone = Arc::clone(&client);
+    let mut dox_acc = request::DoxbinAccount::new(client_clone);
+    if let Some(()) = dox_acc.generate_xsrf_token(DoxBinAccountGetXsrf::NewAccount).await {
+        if let Some(results) = dox_acc.pars_past().await {
+            println!("{:?}", results)
+        }
+    };
+
+
+
+
+    // let mut dox_acc_storage = request::DoxbinAccountStorage::new();
+    // dox_acc_storage._auth("dae232b41db709ec5cae89473b4b1dd6".to_string()).await;
+    // if let Some((total_count, session_count)) = dox_acc_storage.load_from_file() {
+    //     println!("{total_count}, {session_count}");
+    // }
     Ok(())
     // threads_reg().await
 }

@@ -80,3 +80,15 @@ pub struct DoxBinAccount {
     pub password: String,
     pub session: DoxBinAccountSession,
 }
+pub enum DoxBinAccountGetXsrf {
+    NewAccount,
+    ExistAccount { session: String }
+}
+
+#[derive(Debug)]
+pub struct  ResponseParsing {
+    pub link: String,
+    pub user: String,
+    pub id: String,
+
+}

@@ -1,13 +1,13 @@
 use std::{fs, io};
 use std::path::Path;
-use reqwest::{Client, Error, get, header::HeaderMap};
+use reqwest::{Client, Error, get, header::HeaderMap, Proxy};
 use cookie::{Cookie, CookieJar};
 use std::sync::{Arc, Mutex};
 use serde::de::StdError;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use super::XSRF_TOKEN_LINKS;
-use super::enums::{ApiCaptchaResponseGetCode, Payload, read_json_from_file_captcha, ApiCaptchaResponse, DoxBinAccount, DoxBinAccountSession};
+use super::{request, XSRF_TOKEN_LINKS};
+use super::enums::{ApiCaptchaResponseGetCode, Payload, read_json_from_file_captcha, ApiCaptchaResponse, DoxBinAccount, DoxBinAccountSession, DoxBinAccountGetXsrf, ResponseParsing};
 use super::config::{generate_password, generate_username};
 use dotenv::dotenv;
 use std::env;
@@ -16,170 +16,27 @@ use std::io::{BufRead, BufReader, Read};
 use tokio::time::{sleep, Duration};
 use regex::Regex;
 
+use scraper::{Html, Selector};
+
+
 pub struct DoxbinAccount {
     client: Arc<Client>,
     cookie_jar: Arc<Mutex<CookieJar>>,
     headers: HeaderMap,
     captcha_client: Captcha,
+}
+
+pub struct DoxbinAccountStorage {
     accounts_storage: Vec<DoxBinAccount>
 }
 
-impl DoxbinAccount {
-    pub fn new(client: Arc<Client>) -> Self {
-        DoxbinAccount {
-            client,
-            headers: HeaderMap::new(),
-            cookie_jar: Arc::new(Mutex::new(CookieJar::new())),
-            captcha_client: Captcha::new(),
+impl DoxbinAccountStorage {
+
+    pub fn new() -> Self {
+        DoxbinAccountStorage {
             accounts_storage: Vec::new(),
         }
     }
-
-    fn get_cookie_header(&self, url: &str) -> Option<String> {
-        let jar = self.cookie_jar.lock().unwrap();
-        let url = reqwest::Url::parse(url).expect("Invalid URL");
-        let cookies = jar.iter()
-            .filter(|cookie| {
-                cookie.domain().map_or(false, |domain| url.domain().map_or(false, |url_domain| url_domain.ends_with(domain)))
-            })
-            .map(|cookie| format!("{}={}", cookie.name(), cookie.value()))
-            .collect::<Vec<_>>()
-            .join("; ");
-        if cookies.is_empty() { None } else { Some(cookies) }
-    }
-
-    async fn get(&self, url: &str) -> Result<(usize, String), Error> {
-        // if url == "https://doxbin.org/register" {
-        //     self.print_cookies("DO");
-        // }
-        let mut request = self.client.get(url).headers(self.headers.clone());
-        if let Some(cookie_header) = self.get_cookie_header(url) {
-            request = request.header(reqwest::header::COOKIE, cookie_header);
-        }
-        let response = request.send().await?;
-        {
-            let mut jar = self.cookie_jar.lock().unwrap();
-            for cookie in response.headers().get_all(reqwest::header::SET_COOKIE).iter() {
-                if let Ok(cookie_str) = cookie.to_str() {
-                    if let Ok(parsed_cookie) = Cookie::parse(cookie_str.to_string()) {
-                        jar.add(parsed_cookie);
-                    }
-                }
-            }
-        }
-        // if url == "https://doxbin.org/register" {
-        //     self.print_cookies("POSLE");
-        // }
-        let rtrn =( response.status().as_u16() as usize, response.text().await?);
-        Ok(rtrn)
-    }
-
-    async fn post(&self, url: &str, body: &Value) -> Result<(usize, String), Error> {
-        let mut request = self.client.post(url).headers(self.headers.clone()).json(body);
-        if let Some(cookie_header) = self.get_cookie_header(url) {
-            request = request.header(reqwest::header::COOKIE, cookie_header);
-        }
-        let response = request.send().await?;
-        let mut session_value = String::new();
-        {
-            let mut jar = self.cookie_jar.lock().unwrap();
-            for cookie in response.headers().get_all(reqwest::header::SET_COOKIE).iter() {
-                if let Ok(cookie_str) = cookie.to_str() {
-                    if let Ok(parsed_cookie) = Cookie::parse(cookie_str.to_string()) {
-                        jar.add(parsed_cookie.clone());
-                        if parsed_cookie.name() == "session" {
-                            session_value = parsed_cookie.value().to_string(); // Сохраняем значение
-                        }
-                    }
-                }
-            }
-        }
-
-
-        Ok((response.status().as_u16() as usize, session_value))
-    }
-
-    fn print_cookies(&self, message: &str) {
-        let jar = self.cookie_jar.lock().unwrap();
-        for cookie in jar.iter() {
-            println!(
-                "{}: name={}, value={}, domain={}, expires={:?}",
-                message,
-                cookie.name(),
-                cookie.value(),
-                cookie.domain().unwrap_or(""),
-                cookie.expires()
-            );
-        }
-    }
-
-    fn check_xsrf_token(&self) -> Option<()> {
-        let mut jar = self.cookie_jar.lock().unwrap();
-        if jar.get("XSRF-TOKEN").is_some() {
-            return Some(());
-        }
-        None
-    }
-    pub async fn generate_xsrf_token(&self) -> Option<()> {
-        for link in XSRF_TOKEN_LINKS.iter() {
-            match self.get(link.clone()).await {
-                Ok(_) => {}
-                Err(_) => { return None }
-            }
-        }
-        let json_payload = match read_json_from_file("payload.json") {
-            Ok(payload) => payload,
-            Err(e) => {
-                eprintln!("Error reading JSON payload: {}", e);
-                return None;
-            }
-        };
-        match self.post("https://doxbin.org/.well-known/ddos-guard/mark/", &json_payload).await {
-            // Ok(status) => { println!("POST request status code: {}", status) },
-            // Err(e) => eprintln!("POST request error: {}", e),
-            _ => {}
-        }
-        self.get(&"https://doxbin.org/").await;
-        // self.print_cookies("asd");
-        self.check_xsrf_token()
-    }
-
-    pub async fn create_account(&self) -> Option<(String, String, String)> {
-        if self.generate_xsrf_token().await.is_some() {
-            if let Ok((status, text)) = self.get("https://doxbin.org/register").await {
-                let re = Regex::new(r#"<input type="hidden" name="_token" value="([^"]+)""#).expect("Failed to create regex");
-                if let Some(captures) = re.captures(&text) {
-                    if let Some(value) = captures.get(1) {
-                        let _token = value.as_str();
-                        let _code = self.captcha_client.get_token().await.unwrap_or_default();
-                        println!("Token value: {}", _token);
-                        let pswd = generate_password();
-                        let snm = generate_username();
-                        let json_payload = json!({
-                            "username": snm,
-                            "email": "",
-                            "password": pswd,
-                            "confpass": pswd,
-                            "_token": _token,
-                            "hcaptcha_token": _code,
-                        });
-                        match self.post("https://doxbin.org/register", &json_payload).await {
-                            Ok((resp_code, _message)) if resp_code == 200 => {
-                                println!("{}:{}\tSession: {}", snm, pswd, _message);
-                                return Some((snm, pswd, _message));
-                            }
-                            Err(e) => {
-                                eprintln!("Error match get session {:?}", e)
-                            }
-                            _ => {}
-                        }
-                    }
-                }
-            }
-        }
-        None
-    }
-
     pub fn load_from_file(&mut self) -> Option<(i32, i32)> {
         let file = File::open("./results.txt");
         let file = match file {
@@ -224,6 +81,217 @@ impl DoxbinAccount {
             println!("{}:{}\t{:?}", i.login, i.password,i.session)
         }
     }
+
+    pub async fn _auth(&self, session: String) {
+        let client = Arc::new(Client::builder()
+            .pool_max_idle_per_host(50)
+            .build()
+            .expect("Failed to build client auth doxbin storage"));
+        let client_clone = Arc::clone(&client);
+        let mut dox_acc = request::DoxbinAccount::new(client_clone);
+        dox_acc.generate_xsrf_token(DoxBinAccountGetXsrf::ExistAccount {session }).await.unwrap()
+    }
+}
+
+impl DoxbinAccount {
+    pub fn new(client: Arc<Client>) -> Self {
+        DoxbinAccount {
+            client,
+            headers: HeaderMap::new(),
+            cookie_jar: Arc::new(Mutex::new(CookieJar::new())),
+            captcha_client: Captcha::new()
+        }
+    }
+    fn get_cookie_header(&self, url: &str) -> Option<String> {
+        let jar = self.cookie_jar.lock().unwrap();
+        let url = reqwest::Url::parse(url).expect("Invalid URL");
+        let cookies = jar.iter()
+            .filter(|cookie| {
+                cookie.domain().map_or(false, |domain| url.domain().map_or(false, |url_domain| url_domain.ends_with(domain)))
+            })
+            .map(|cookie| format!("{}={}", cookie.name(), cookie.value()))
+            .collect::<Vec<_>>()
+            .join("; ");
+        if cookies.is_empty() { None } else { Some(cookies) }
+    }
+    async fn get(&self, url: &str) -> Result<(usize, String), Error> {
+        // if url == "https://doxbin.org/register" {
+        //     self.print_cookies("DO");
+        // }
+        let mut request = self.client.get(url).headers(self.headers.clone());
+        if let Some(cookie_header) = self.get_cookie_header(url) {
+            request = request.header(reqwest::header::COOKIE, cookie_header);
+        }
+        let response = request.send().await?;
+        {
+            let mut jar = self.cookie_jar.lock().unwrap();
+            for cookie in response.headers().get_all(reqwest::header::SET_COOKIE).iter() {
+                if let Ok(cookie_str) = cookie.to_str() {
+                    if let Ok(parsed_cookie) = Cookie::parse(cookie_str.to_string()) {
+                        jar.add(parsed_cookie);
+                    }
+                }
+            }
+        }
+        // if url == "https://doxbin.org/register" {
+        //     self.print_cookies("POSLE");
+        // }
+        let rtrn =( response.status().as_u16() as usize, response.text().await?);
+        Ok(rtrn)
+    }
+    async fn post(&self, url: &str, body: &Value) -> Result<(usize, String), Error> {
+        let mut request = self.client.post(url).headers(self.headers.clone()).json(body);
+        if let Some(cookie_header) = self.get_cookie_header(url) {
+            request = request.header(reqwest::header::COOKIE, cookie_header);
+        }
+        let response = request.send().await?;
+        let mut session_value = String::new();
+        {
+            let mut jar = self.cookie_jar.lock().unwrap();
+            for cookie in response.headers().get_all(reqwest::header::SET_COOKIE).iter() {
+                if let Ok(cookie_str) = cookie.to_str() {
+                    if let Ok(parsed_cookie) = Cookie::parse(cookie_str.to_string()) {
+                        jar.add(parsed_cookie.clone());
+                        if parsed_cookie.name() == "session" {
+                            session_value = parsed_cookie.value().to_string(); // Сохраняем значение
+                        }
+                    }
+                }
+            }
+        }
+
+
+        Ok((response.status().as_u16() as usize, session_value))
+    }
+    fn print_cookies(&self, message: &str) {
+        let jar = self.cookie_jar.lock().unwrap();
+        for cookie in jar.iter() {
+            println!(
+                "{}: name={}, value={}, domain={}, expires={:?}",
+                message,
+                cookie.name(),
+                cookie.value(),
+                cookie.domain().unwrap_or(""),
+                cookie.expires()
+            );
+        }
+    }
+    fn check_xsrf_token(&self) -> Option<()> {
+        let mut jar = self.cookie_jar.lock().unwrap();
+        if jar.get("XSRF-TOKEN").is_some() {
+            return Some(());
+        }
+        None
+    }
+    pub async fn generate_xsrf_token(&self, type_generate: DoxBinAccountGetXsrf) -> Option<()> {
+        match type_generate {
+            DoxBinAccountGetXsrf::ExistAccount {session} => {
+                let mut jar = self.cookie_jar.lock().unwrap();
+                let cookie = Cookie::new("session", session.clone());
+                let cookie = Cookie::build(cookie)
+                    .domain("doxbin.org")
+                    .path("/")
+                    .http_only(false)
+                    .secure(false)
+                    .finish();
+                jar.add(cookie);
+            },
+            _ => {}
+        }
+        for link in XSRF_TOKEN_LINKS.iter() {
+            match self.get(link.clone()).await {
+                Ok(_) => {}
+                Err(_) => { return None }
+            }
+        }
+        let json_payload = match read_json_from_file("payload.json") {
+            Ok(payload) => payload,
+            Err(e) => {
+                eprintln!("Error reading JSON payload: {}", e);
+                return None;
+            }
+        };
+        match self.post("https://doxbin.org/.well-known/ddos-guard/mark/", &json_payload).await {
+            // Ok(status) => { println!("POST request status code: {}", status) },
+            // Err(e) => eprintln!("POST request error: {}", e),
+            _ => {}
+        }
+        if let Ok((status_code, text)) = self.get(&"https://doxbin.org/").await {
+            // println!("{}", text.clone())
+        }
+        self.check_xsrf_token()
+    }
+    pub async fn create_account(&self) -> Option<(String, String, String)> {
+        if self.generate_xsrf_token(DoxBinAccountGetXsrf::NewAccount).await.is_some() {
+            if let Ok((status, text)) = self.get("https://doxbin.org/register").await {
+                let re = Regex::new(r#"<input type="hidden" name="_token" value="([^"]+)""#).expect("Failed to create regex");
+                if let Some(captures) = re.captures(&text) {
+                    if let Some(value) = captures.get(1) {
+                        let _token = value.as_str();
+                        let _code = self.captcha_client.get_token().await.unwrap_or_default();
+                        println!("Token value: {}", _token);
+                        let pswd = generate_password();
+                        let snm = generate_username();
+                        let json_payload = json!({
+                            "username": snm,
+                            "email": "",
+                            "password": pswd,
+                            "confpass": pswd,
+                            "_token": _token,
+                            "hcaptcha_token": _code,
+                        });
+                        match self.post("https://doxbin.org/register", &json_payload).await {
+                            Ok((resp_code, _message)) if resp_code == 200 => {
+                                println!("{}:{}\tSession: {}", snm, pswd, _message);
+                                return Some((snm, pswd, _message));
+                            }
+                            Err(e) => {
+                                eprintln!("Error match get session {:?}", e)
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+            }
+        }
+        None
+    }
+    pub async fn pars_past(&self) -> Option<(Vec<ResponseParsing>)> {
+        let mut results: Vec<ResponseParsing> = Vec::new();
+        for iter in 1..100 {
+            // let url = format!("https://doxbin.org/?page={}", iter);
+            if let Ok((status_code, html)) = self.get(&format!("https://doxbin.org/?page={}", iter)).await {
+                let document = Html::parse_document(&html);
+                let tbody_selector = Selector::parse("tbody").unwrap();
+                let tr_selector = Selector::parse("tr.doxentry").unwrap();
+                let a_selector = Selector::parse("a").unwrap();
+                let user_selector = Selector::parse("a.dox-username").unwrap();
+
+                let tbodies = document.select(&tbody_selector).collect::<Vec<_>>();
+                if tbodies.len() < 2 {
+                    // return None;
+                    continue
+                }
+
+
+                for element in tbodies[1].select(&tr_selector) {
+                    let link_elem = element.select(&a_selector).next().unwrap();
+                    let link = link_elem.value().attr("href").unwrap_or_default().to_string();
+                    println!("Link: {}", link);
+                    println!("Index: {}", iter);
+
+                    let user_elem = element.select(&user_selector).next();
+                    let user = user_elem.map_or(String::from("Unknown"), |e| e.inner_html().trim().to_string());
+
+                    let id = element.value().attr("id").unwrap_or_default().to_string();
+                    println!("User: {}", user);
+                    println!("ID: {}", id);
+                }
+            }
+        }
+        return Some(results)
+    }
+
 }
 fn read_json_from_file<P: AsRef<Path>>(path: P) -> Result<Value, Box<dyn StdError>> {
     let data = fs::read_to_string(path)?;
