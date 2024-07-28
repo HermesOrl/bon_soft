@@ -11,7 +11,8 @@ use super::enums::{ApiCaptchaResponseGetCode, Payload, read_json_from_file_captc
 use super::config::{generate_password, generate_username};
 use dotenv::dotenv;
 use std::env;
-use std::fs::File;
+use std::io::Write;
+use std::fs::{File, OpenOptions};
 use std::io::{BufRead, BufReader, Read};
 use tokio::time::{sleep, Duration};
 use regex::Regex;
@@ -257,9 +258,9 @@ impl DoxbinAccount {
         None
     }
     pub async fn pars_past(&self) -> Option<(Vec<ResponseParsing>)> {
+        println!("start pars");
         let mut results: Vec<ResponseParsing> = Vec::new();
         for iter in 1..100 {
-            // let url = format!("https://doxbin.org/?page={}", iter);
             if let Ok((status_code, html)) = self.get(&format!("https://doxbin.org/?page={}", iter)).await {
                 let document = Html::parse_document(&html);
                 let tbody_selector = Selector::parse("tbody").unwrap();
@@ -269,11 +270,15 @@ impl DoxbinAccount {
 
                 let tbodies = document.select(&tbody_selector).collect::<Vec<_>>();
                 if tbodies.len() < 2 {
-                    // return None;
                     continue
                 }
 
-
+                let mut file = OpenOptions::new()
+                    .write(true)
+                    .create(true)
+                    .append(true)
+                    .open("parsing.txt")
+                    .expect("Unable to open file");
                 for element in tbodies[1].select(&tr_selector) {
                     let link_elem = element.select(&a_selector).next().unwrap();
                     let link = link_elem.value().attr("href").unwrap_or_default().to_string();
@@ -286,7 +291,10 @@ impl DoxbinAccount {
                     let id = element.value().attr("id").unwrap_or_default().to_string();
                     println!("User: {}", user);
                     println!("ID: {}", id);
+                    writeln!(file, "{}_{}_{}", id, user, link).expect("REASON")
                 }
+
+
             }
         }
         return Some(results)
