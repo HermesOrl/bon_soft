@@ -19,9 +19,10 @@ async fn main() -> Result<(), Box<dyn StdError>> {
     let client_clone = Arc::clone(&client);
     let mut dox_acc = request::DoxbinAccount::new(client_clone);
     if let Some(()) = dox_acc.generate_xsrf_token(DoxBinAccountGetXsrf::NewAccount).await {
-        if let Some(results) = dox_acc.pars_past().await {
-            println!("{:?}", results)
-        }
+        // if let Some(results) = dox_acc.pars_past().await {
+        //     println!("{:?}", results)
+        // }
+        dox_acc.subscribe_new_past().await
     };
 
 

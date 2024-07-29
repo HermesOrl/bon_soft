@@ -1,5 +1,7 @@
-use std::fs;
-use std::io::Read;
+use std::collections::HashSet;
+use std::{fs, io};
+use std::fs::File;
+use std::io::{BufRead, BufReader, Read};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -91,4 +93,41 @@ pub struct  ResponseParsing {
     pub user: String,
     pub id: String,
 
+}
+
+pub struct LinkManager {
+    links: HashSet<String>,
+}
+
+impl LinkManager {
+    pub fn new() -> Self {
+        Self {
+            links: HashSet::new(),
+        }
+    }
+    pub fn read_from_file(&mut self, file_path: &str) -> io::Result<()> {
+        let file = File::open(file_path)?;
+        let reader = BufReader::new(file);
+
+        for line in reader.lines() {
+            let line = line?;
+            let parts: Vec<&str> = line.split("_;_").collect();
+            // println!("{:?}", parts);
+            if parts.len() == 3 {
+                self.links.insert(parts[2].to_string());
+            }
+        }
+        Ok(())
+    }
+    pub fn add_link(&mut self, link: String) -> bool {
+        // for linkkk in self.links.clone() {
+        //     println!("{}", linkkk)
+        // }
+        if self.links.contains(&link) {
+            false
+        } else {
+            self.links.insert(link.to_string());
+            true
+        }
+    }
 }

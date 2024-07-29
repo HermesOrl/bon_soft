@@ -7,7 +7,7 @@ use serde::de::StdError;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use super::{request, XSRF_TOKEN_LINKS};
-use super::enums::{ApiCaptchaResponseGetCode, Payload, read_json_from_file_captcha, ApiCaptchaResponse, DoxBinAccount, DoxBinAccountSession, DoxBinAccountGetXsrf, ResponseParsing};
+use super::enums::{ApiCaptchaResponseGetCode, Payload, read_json_from_file_captcha, ApiCaptchaResponse, DoxBinAccount, DoxBinAccountSession, DoxBinAccountGetXsrf, ResponseParsing, LinkManager};
 use super::config::{generate_password, generate_username};
 use dotenv::dotenv;
 use std::env;
@@ -16,7 +16,6 @@ use std::fs::{File, OpenOptions};
 use std::io::{BufRead, BufReader, Read};
 use tokio::time::{sleep, Duration};
 use regex::Regex;
-
 use scraper::{Html, Selector};
 
 
@@ -258,9 +257,10 @@ impl DoxbinAccount {
         None
     }
     pub async fn pars_past(&self) -> Option<(Vec<ResponseParsing>)> {
-        println!("start pars");
+        let mut manager = LinkManager::new();
+        manager.read_from_file("./parsing.txt").ok();
         let mut results: Vec<ResponseParsing> = Vec::new();
-        for iter in 1..100 {
+        for iter in 1..1000 {
             if let Ok((status_code, html)) = self.get(&format!("https://doxbin.org/?page={}", iter)).await {
                 let document = Html::parse_document(&html);
                 let tbody_selector = Selector::parse("tbody").unwrap();
@@ -282,22 +282,62 @@ impl DoxbinAccount {
                 for element in tbodies[1].select(&tr_selector) {
                     let link_elem = element.select(&a_selector).next().unwrap();
                     let link = link_elem.value().attr("href").unwrap_or_default().to_string();
-                    println!("Link: {}", link);
-                    println!("Index: {}", iter);
+                    println!("Iter: {}", iter);
 
                     let user_elem = element.select(&user_selector).next();
                     let user = user_elem.map_or(String::from("Unknown"), |e| e.inner_html().trim().to_string());
-
                     let id = element.value().attr("id").unwrap_or_default().to_string();
-                    println!("User: {}", user);
-                    println!("ID: {}", id);
-                    writeln!(file, "{}_{}_{}", id, user, link).expect("REASON")
+                    if manager.add_link(link.clone()) {
+                        writeln!(file, "{}_;_{}_;_{}", id, user, link).expect("REASON")
+                    }
                 }
 
 
             }
         }
         return Some(results)
+    }
+
+    pub async fn subscribe_new_past(&self) {
+        let mut manager = LinkManager::new();
+        manager.read_from_file("./parsing.txt").ok();
+        for iter in 1..15000 {
+            let mut count_add = 0;
+            if let Ok((status_code, html)) = self.get(&"https://doxbin.org/?page=1").await {
+                let document = Html::parse_document(&html);
+                let tbody_selector = Selector::parse("tbody").unwrap();
+                let tr_selector = Selector::parse("tr.doxentry").unwrap();
+                let a_selector = Selector::parse("a").unwrap();
+                let user_selector = Selector::parse("a.dox-username").unwrap();
+
+                let tbodies = document.select(&tbody_selector).collect::<Vec<_>>();
+                if tbodies.len() < 2 {
+                    continue
+                }
+
+                let mut file = OpenOptions::new()
+                    .write(true)
+                    .create(true)
+                    .append(true)
+                    .open("parsing.txt")
+                    .expect("Unable to open file");
+                for element in tbodies[1].select(&tr_selector) {
+                    let link_elem = element.select(&a_selector).next().unwrap();
+                    let link = link_elem.value().attr("href").unwrap_or_default().to_string();
+                    // println!("Iter: {}", iter);
+
+                    let user_elem = element.select(&user_selector).next();
+                    let user = user_elem.map_or(String::from("Unknown"), |e| e.inner_html().trim().to_string());
+                    let id = element.value().attr("id").unwrap_or_default().to_string();
+                    if manager.add_link(link.clone()) {
+                        count_add += 1;
+                        writeln!(file, "{}_;_{}_;_{}", id, user, link).expect("REASON")
+                    }
+                }
+            }
+            println!("Add {} users. Sleeping....", count_add);
+            sleep(Duration::from_secs(50)).await;
+        }
     }
 
 }
