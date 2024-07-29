@@ -131,3 +131,15 @@ impl LinkManager {
         }
     }
 }
+
+pub enum ModeComment {
+    Paste,
+    Profile,
+    PasteAndProfile,
+}
+
+
+pub enum ModeSubscribeOnPastes{
+    Ignore,
+    Comment { text: String, mode_comment: ModeComment, anon: bool }
+}

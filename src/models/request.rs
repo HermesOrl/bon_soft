@@ -7,7 +7,7 @@ use serde::de::StdError;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use super::{request, XSRF_TOKEN_LINKS};
-use super::enums::{ApiCaptchaResponseGetCode, Payload, read_json_from_file_captcha, ApiCaptchaResponse, DoxBinAccount, DoxBinAccountSession, DoxBinAccountGetXsrf, ResponseParsing, LinkManager};
+use super::enums::{ApiCaptchaResponseGetCode, Payload, read_json_from_file_captcha, ApiCaptchaResponse, DoxBinAccount, DoxBinAccountSession, DoxBinAccountGetXsrf, ResponseParsing, LinkManager, ModeSubscribeOnPastes, ModeComment};
 use super::config::{generate_password, generate_username};
 use dotenv::dotenv;
 use std::env;
@@ -298,7 +298,7 @@ impl DoxbinAccount {
         return Some(results)
     }
 
-    pub async fn subscribe_new_past(&self) {
+    pub async fn subscribe_on_pastes(&self, mode: ModeSubscribeOnPastes) {
         let mut manager = LinkManager::new();
         manager.read_from_file("./parsing.txt").ok();
         for iter in 1..15000 {
@@ -331,7 +331,14 @@ impl DoxbinAccount {
                     let id = element.value().attr("id").unwrap_or_default().to_string();
                     if manager.add_link(link.clone()) {
                         count_add += 1;
-                        writeln!(file, "{}_;_{}_;_{}", id, user, link).expect("REASON")
+                        writeln!(file, "{}_;_{}_;_{}", id, user, link).expect("REASON");
+                        if let ModeSubscribeOnPastes::Comment {ref text, ref mode_comment, ref anon} = mode {
+                            match mode_comment {
+                                ModeComment::Paste => {},
+                                ModeComment::Profile => {}
+                                ModeComment::PasteAndProfile => {}
+                            }
+                        }
                     }
                 }
             }

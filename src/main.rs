@@ -1,14 +1,14 @@
 use tokio::task;
 mod models;
 use serde::de::StdError;
-use models::{request, proxy};
+use models::{request, proxy, enums::{DoxBinAccountGetXsrf, ModeSubscribeOnPastes, ModeComment}};
 use reqwest::{Client, Proxy};
 use std::sync::{Arc, Mutex};
 use std::fs::OpenOptions;
 use std::io::Write;
 use tokio::task::spawn_blocking;
 use tokio::sync::mpsc;
-use crate::models::enums::DoxBinAccountGetXsrf;
+
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn StdError>> {
@@ -22,7 +22,7 @@ async fn main() -> Result<(), Box<dyn StdError>> {
         // if let Some(results) = dox_acc.pars_past().await {
         //     println!("{:?}", results)
         // }
-        dox_acc.subscribe_new_past().await
+        dox_acc.subscribe_on_pastes(ModeSubscribeOnPastes::Ignore).await
     };
 
 
