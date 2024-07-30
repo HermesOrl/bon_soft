@@ -12,7 +12,7 @@ use tokio::sync::mpsc;
 
 #[cfg(test)]
 mod tests {
-    use crate::models::enums::{ModeChange, ParameterComment};
+    use crate::models::enums::{ModeChange, ParameterComment, ParameterCommentAccount};
     use super::*;
     use tokio;
     use tokio::runtime::Runtime;
@@ -27,15 +27,29 @@ mod tests {
         let client_clone = Arc::clone(&client);
         let mut dox_acc = request::DoxbinAccount::new(client_clone);
         dox_acc.upload_proxies();
-        let result_change_proxy = dox_acc.change_profile(ModeChange::All).await;
-        assert!(!matches!(result_change_proxy, None));
         let result = dox_acc.paste(ModeComment::Paste, ParameterComment {
             username: "asd".to_string(),
             link: "https://doxbin.org/upload/YopDreiProhax1".to_string(),
-            anon: true,
+            parameter_account: ParameterCommentAccount::CreateNew,
             text: "leee".to_string(),
         }).await;
 
+        assert!(!matches!(result, None));
+    }
+
+    #[tokio::test]
+    async fn parsingg() {
+
+        let client = Arc::new(Client::builder()
+            .pool_max_idle_per_host(50)
+            .build()
+            .expect("Failed to build client auth doxbin storage"));
+        let client_clone = Arc::clone(&client);
+        let mut dox_acc = request::DoxbinAccount::new(client_clone);
+        dox_acc.upload_proxies();
+        dox_acc.change_profile(ModeChange::Cookie).await;
+        dox_acc.subscribe_on_pastes(ModeSubscribeOnPastes::Ignore).await;
+        let result = Some(());
         assert!(!matches!(result, None));
     }
 }

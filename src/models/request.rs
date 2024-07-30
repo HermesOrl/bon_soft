@@ -7,7 +7,7 @@ use serde::de::StdError;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use super::{request, XSRF_TOKEN_LINKS};
-use super::enums::{ApiCaptchaResponseGetCode, Payload, read_json_from_file_captcha, ApiCaptchaResponse, DoxBinAccount, DoxBinAccountSession, DoxBinAccountGetXsrf, ResponseParsing, LinkManager, ModeSubscribeOnPastes, ModeComment, ModeChange, ParameterComment};
+use super::enums::{ApiCaptchaResponseGetCode, Payload, read_json_from_file_captcha, ApiCaptchaResponse, DoxBinAccount, DoxBinAccountSession, DoxBinAccountGetXsrf, ResponseParsing, LinkManager, ModeSubscribeOnPastes, ModeComment, ModeChange, ParameterComment, ParameterCommentAccount, ParameterCommentAccountUseExist};
 use super::config::{generate_password, generate_username};
 use dotenv::dotenv;
 use std::env;
@@ -96,6 +96,7 @@ impl DoxbinAccountStorage {
 }
 
 impl DoxbinAccount {
+
     pub fn new(client: Arc<Client>) -> Self {
         DoxbinAccount {
             client,
@@ -183,6 +184,13 @@ impl DoxbinAccount {
         }
         None
     }
+    fn check_session_token(&self) -> Option<()> {
+        let mut jar = self.cookie_jar.lock().unwrap();
+        if jar.get("session").is_some() {
+            return Some(());
+        }
+        None
+    }
     pub async fn generate_xsrf_token(&self, type_generate: DoxBinAccountGetXsrf) -> Option<()> {
         match type_generate {
             DoxBinAccountGetXsrf::ExistAccount {session} => {
@@ -241,8 +249,9 @@ impl DoxbinAccount {
                             "hcaptcha_token": _code,
                         });
                         match self.post("https://doxbin.org/register", &json_payload).await {
-                            Ok((resp_code, _message, _)) if resp_code == 200 => {
+                            Ok((resp_code, _message, response_)) if resp_code == 200 => {
                                 println!("{}:{}\tSession: {}", snm, pswd, _message);
+                                println!("response create account: {}", response_);
                                 return Some((snm, pswd, _message));
                             }
                             Err(e) => {
@@ -297,18 +306,15 @@ impl DoxbinAccount {
         }
         return Some(results)
     }
-
     pub fn upload_proxies(&mut self) -> Option<()> {
         self.proxy_manager.add_from_file("./proxies.txt").expect("TODO: failed upload proxies");
         return Some(())
     }
-
     fn clear_cookies(&mut self) -> Option<()> {
         let mut cooks = self.cookie_jar.lock().unwrap();
         *cooks = CookieJar::new();
         return Some(())
     }
-
     async fn change_cookies(&mut self) -> Option<()> {
         self.clear_cookies();
         if let Some(()) = self.generate_xsrf_token(DoxBinAccountGetXsrf::NewAccount).await {
@@ -316,7 +322,6 @@ impl DoxbinAccount {
         }
         None
     }
-
     fn change_proxy(&mut self) -> Option<()> {
         match self.proxy_manager.get_next_proxy() {
             Ok(proxy_sproxy) => {
@@ -331,7 +336,6 @@ impl DoxbinAccount {
         }
         None
     }
-
     pub async fn check_ip(&mut self) -> Option<()> {
         if let Ok((status_code, text)) = self.get(&"https://httpbin.org/ip").await {
             println!("Not change ip: {}", text);
@@ -344,7 +348,6 @@ impl DoxbinAccount {
         }
         return None
     }
-
     pub async fn change_profile(&mut self, mode_change: ModeChange) -> Option<()> {
         match mode_change {
             ModeChange::Proxy => {
@@ -361,7 +364,6 @@ impl DoxbinAccount {
         }
         None
     }
-
     async fn comment_paste(&mut self, link: String, message_paste: String) -> Option<()>{
         if let Ok((status_code, text)) = self.get(&link).await {
             let re = Regex::new(r#"<input type="hidden" name="_token" value="([^"]+)""#).expect("Failed to create regex");
@@ -394,10 +396,24 @@ impl DoxbinAccount {
         None
     }
     pub async fn paste(&mut self, mode_paste: ModeComment, parameters_comment: ParameterComment) -> Option<()> {
-        self.change_proxy();
-        if !&parameters_comment.anon {
-            if let Some((username, password, session_str)) = self.create_account().await {
-                println!("Log print\t{}:{}|{}", username, password, session_str);
+        match parameters_comment.parameter_account {
+            ParameterCommentAccount::CreateNew => {
+                if let Some((username, password, session_str)) = self.create_account().await {
+                    println!("Log print\t{}:{}|{}", username, password, session_str);
+                }
+            }
+            ParameterCommentAccount::UseExist {exist_type} => {
+                match exist_type {
+                    ParameterCommentAccountUseExist::ExistAnon  => {
+                        self.check_xsrf_token();
+                    }
+                    ParameterCommentAccountUseExist::ExistReg => {
+                        self.check_session_token();
+                    }
+                }
+            }
+            ParameterCommentAccount::Anon => {
+                self.change_profile(ModeChange::Cookie)?
             }
         }
         match mode_paste {
@@ -409,7 +425,6 @@ impl DoxbinAccount {
         }
         None
     }
-
     pub async fn subscribe_on_pastes(&mut self, mode: ModeSubscribeOnPastes) {
         let mut manager = LinkManager::new();
         manager.read_from_file("./parsing.txt").ok();
@@ -444,11 +459,11 @@ impl DoxbinAccount {
                     if manager.add_link(link.clone()) {
                         count_add += 1;
                         writeln!(file, "{}_;_{}_;_{}", id, user.clone(), link.clone()).expect("REASON");
-                        if let ModeSubscribeOnPastes::Comment { text,  mode_comment, anon} = mode.clone() {
-                            if let Some(()) = self.paste(mode_comment, ParameterComment{username: user, link, anon, text}).await {
-                                println!("Comment success")
-                            }
-                        }
+                        // if let ModeSubscribeOnPastes::Comment { text,  mode_comment, anon} = mode.clone() {
+                        //     if let Some(()) = self.paste(mode_comment, ParameterComment{username: user, link, parameter_account: ParameterCommentAccount::Anon, text}).await {
+                        //         println!("Comment success")
+                        //     }
+                        // }
                     }
                 }
             }

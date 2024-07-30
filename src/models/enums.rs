@@ -139,10 +139,21 @@ pub enum ModeComment {
     PasteAndProfile,
 }
 
+pub enum ParameterCommentAccountUseExist {
+    ExistReg,
+    ExistAnon,
+}
+
+pub enum ParameterCommentAccount {
+    CreateNew,
+    UseExist {exist_type: ParameterCommentAccountUseExist },
+    Anon,
+}
+
 pub struct ParameterComment {
     pub username: String,
     pub link: String,
-    pub anon: bool,
+    pub parameter_account: ParameterCommentAccount,
     pub text: String
 }
 
