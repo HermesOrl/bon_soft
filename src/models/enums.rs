@@ -132,14 +132,29 @@ impl LinkManager {
     }
 }
 
+#[derive(Clone)]
 pub enum ModeComment {
     Paste,
     Profile,
     PasteAndProfile,
 }
 
+pub struct ParameterComment {
+    pub username: String,
+    pub link: String,
+    pub anon: bool,
+    pub text: String
+}
 
+#[derive(Clone)]
 pub enum ModeSubscribeOnPastes{
     Ignore,
     Comment { text: String, mode_comment: ModeComment, anon: bool }
+}
+
+
+pub enum ModeChange {
+    Cookie,
+    Proxy,
+    All
 }

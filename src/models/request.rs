@@ -7,7 +7,7 @@ use serde::de::StdError;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use super::{request, XSRF_TOKEN_LINKS};
-use super::enums::{ApiCaptchaResponseGetCode, Payload, read_json_from_file_captcha, ApiCaptchaResponse, DoxBinAccount, DoxBinAccountSession, DoxBinAccountGetXsrf, ResponseParsing, LinkManager, ModeSubscribeOnPastes, ModeComment};
+use super::enums::{ApiCaptchaResponseGetCode, Payload, read_json_from_file_captcha, ApiCaptchaResponse, DoxBinAccount, DoxBinAccountSession, DoxBinAccountGetXsrf, ResponseParsing, LinkManager, ModeSubscribeOnPastes, ModeComment, ModeChange, ParameterComment};
 use super::config::{generate_password, generate_username};
 use dotenv::dotenv;
 use std::env;
@@ -17,13 +17,15 @@ use std::io::{BufRead, BufReader, Read};
 use tokio::time::{sleep, Duration};
 use regex::Regex;
 use scraper::{Html, Selector};
-
+use super::proxy::SProxies;
+use tokio::runtime::Runtime;
 
 pub struct DoxbinAccount {
     client: Arc<Client>,
     cookie_jar: Arc<Mutex<CookieJar>>,
     headers: HeaderMap,
     captcha_client: Captcha,
+    proxy_manager: SProxies,
 }
 
 pub struct DoxbinAccountStorage {
@@ -99,7 +101,8 @@ impl DoxbinAccount {
             client,
             headers: HeaderMap::new(),
             cookie_jar: Arc::new(Mutex::new(CookieJar::new())),
-            captcha_client: Captcha::new()
+            captcha_client: Captcha::new(),
+            proxy_manager: SProxies::new(),
         }
     }
     fn get_cookie_header(&self, url: &str) -> Option<String> {
@@ -133,13 +136,10 @@ impl DoxbinAccount {
                 }
             }
         }
-        // if url == "https://doxbin.org/register" {
-        //     self.print_cookies("POSLE");
-        // }
         let rtrn =( response.status().as_u16() as usize, response.text().await?);
         Ok(rtrn)
     }
-    async fn post(&self, url: &str, body: &Value) -> Result<(usize, String), Error> {
+    async fn post(&self, url: &str, body: &Value) -> Result<(usize, String, String), Error> {
         let mut request = self.client.post(url).headers(self.headers.clone()).json(body);
         if let Some(cookie_header) = self.get_cookie_header(url) {
             request = request.header(reqwest::header::COOKIE, cookie_header);
@@ -161,7 +161,7 @@ impl DoxbinAccount {
         }
 
 
-        Ok((response.status().as_u16() as usize, session_value))
+        Ok((response.status().as_u16() as usize, session_value, response.text().await.unwrap()))
     }
     fn print_cookies(&self, message: &str) {
         let jar = self.cookie_jar.lock().unwrap();
@@ -229,7 +229,7 @@ impl DoxbinAccount {
                     if let Some(value) = captures.get(1) {
                         let _token = value.as_str();
                         let _code = self.captcha_client.get_token().await.unwrap_or_default();
-                        println!("Token value: {}", _token);
+                        println!("Token value: {}", _code);
                         let pswd = generate_password();
                         let snm = generate_username();
                         let json_payload = json!({
@@ -241,7 +241,7 @@ impl DoxbinAccount {
                             "hcaptcha_token": _code,
                         });
                         match self.post("https://doxbin.org/register", &json_payload).await {
-                            Ok((resp_code, _message)) if resp_code == 200 => {
+                            Ok((resp_code, _message, _)) if resp_code == 200 => {
                                 println!("{}:{}\tSession: {}", snm, pswd, _message);
                                 return Some((snm, pswd, _message));
                             }
@@ -298,7 +298,119 @@ impl DoxbinAccount {
         return Some(results)
     }
 
-    pub async fn subscribe_on_pastes(&self, mode: ModeSubscribeOnPastes) {
+    pub fn upload_proxies(&mut self) -> Option<()> {
+        self.proxy_manager.add_from_file("./proxies.txt").expect("TODO: failed upload proxies");
+        return Some(())
+    }
+
+    fn clear_cookies(&mut self) -> Option<()> {
+        let mut cooks = self.cookie_jar.lock().unwrap();
+        *cooks = CookieJar::new();
+        return Some(())
+    }
+
+    async fn change_cookies(&mut self) -> Option<()> {
+        self.clear_cookies();
+        if let Some(()) = self.generate_xsrf_token(DoxBinAccountGetXsrf::NewAccount).await {
+            return Some(())
+        }
+        None
+    }
+
+    fn change_proxy(&mut self) -> Option<()> {
+        match self.proxy_manager.get_next_proxy() {
+            Ok(proxy_sproxy) => {
+                let new_client = Arc::new(Client::builder()
+                    .proxy(Proxy::all(&proxy_sproxy.proxy_url).ok()?)
+                    .build()
+                    .expect("Failed to build client in change_proxy"));
+                self.client = new_client;
+                return Some(());
+            }
+            Err(e) => {eprintln!("Failed get next proxy {}", e)}
+        }
+        None
+    }
+
+    pub async fn check_ip(&mut self) -> Option<()> {
+        if let Ok((status_code, text)) = self.get(&"https://httpbin.org/ip").await {
+            println!("Not change ip: {}", text);
+        }
+        if let Some(()) = self.change_proxy() {
+            if let Ok((status_code, text)) = self.get(&"https://httpbin.org/ip").await {
+                println!("Changed ip: {}", text);
+                return Some(())
+            }
+        }
+        return None
+    }
+
+    pub async fn change_profile(&mut self, mode_change: ModeChange) -> Option<()> {
+        match mode_change {
+            ModeChange::Proxy => {
+                return self.change_proxy();
+            },
+            ModeChange::Cookie => {
+                return self.change_cookies().await;
+            },
+            ModeChange::All => {
+                if let Some(()) = self.change_proxy() {
+                    return self.change_cookies().await
+                }
+            },
+        }
+        None
+    }
+
+    async fn comment_paste(&mut self, link: String, message_paste: String) -> Option<()>{
+        if let Ok((status_code, text)) = self.get(&link).await {
+            let re = Regex::new(r#"<input type="hidden" name="_token" value="([^"]+)""#).expect("Failed to create regex");
+            if let Some(captures) = re.captures(&text) {
+                if let Some(value) = captures.get(1) {
+                    let _token = value.as_str();
+                    let _code = self.captcha_client.get_token().await?;
+                    println!("{}", _code);
+                    let doxid = text.split("doxid = ")
+                        .nth(1)
+                        .and_then(|s| s.split(";").next())?;
+                    println!("doxid: {}", doxid);
+                    let payload_json = json!({
+                        "doxId": doxid,
+                        "name": "Anonymous",
+                        "comment": message_paste,
+                        "_token": _token,
+                        "hcaptcha_token": _code,
+                    });
+                    if let Ok((status_code, _, response_html)) = self.post(&"https://doxbin.org/comment", &payload_json).await {
+                        println!("{}", response_html);
+                        println!("status code create paste: {}", status_code);
+                        if let cont = response_html.contains("\"status\":\"done\"") {
+                            return Some(())
+                        }
+                    }
+                }
+            }
+        }
+        None
+    }
+    pub async fn paste(&mut self, mode_paste: ModeComment, parameters_comment: ParameterComment) -> Option<()> {
+        self.change_proxy();
+        if !&parameters_comment.anon {
+            if let Some((username, password, session_str)) = self.create_account().await {
+                println!("Log print\t{}:{}|{}", username, password, session_str);
+            }
+        }
+        match mode_paste {
+            ModeComment::Paste => {
+                return self.comment_paste(parameters_comment.link, parameters_comment.text).await;
+            },
+            ModeComment::Profile => {},
+            ModeComment::PasteAndProfile => {},
+        }
+        None
+    }
+
+    pub async fn subscribe_on_pastes(&mut self, mode: ModeSubscribeOnPastes) {
         let mut manager = LinkManager::new();
         manager.read_from_file("./parsing.txt").ok();
         for iter in 1..15000 {
@@ -331,12 +443,10 @@ impl DoxbinAccount {
                     let id = element.value().attr("id").unwrap_or_default().to_string();
                     if manager.add_link(link.clone()) {
                         count_add += 1;
-                        writeln!(file, "{}_;_{}_;_{}", id, user, link).expect("REASON");
-                        if let ModeSubscribeOnPastes::Comment {ref text, ref mode_comment, ref anon} = mode {
-                            match mode_comment {
-                                ModeComment::Paste => {},
-                                ModeComment::Profile => {}
-                                ModeComment::PasteAndProfile => {}
+                        writeln!(file, "{}_;_{}_;_{}", id, user.clone(), link.clone()).expect("REASON");
+                        if let ModeSubscribeOnPastes::Comment { text,  mode_comment, anon} = mode.clone() {
+                            if let Some(()) = self.paste(mode_comment, ParameterComment{username: user, link, anon, text}).await {
+                                println!("Comment success")
                             }
                         }
                     }
@@ -366,7 +476,7 @@ impl Captcha {
         dotenv().ok();
         Captcha {
             api_key: env::var("API2CAPTCHA").expect("API2CAPTCHA NOT FOUND").to_string(),
-            data_site_key: "c902269c-b6ad-4309-b393-c8c9fd010011".to_string(),
+            data_site_key: "9e62bf30-dc6e-4024-9192-aacaa13ce824".to_string(),
         }
     }
 
