@@ -7,7 +7,10 @@ use serde::de::StdError;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use super::{request, XSRF_TOKEN_LINKS};
-use super::enums::{ApiCaptchaResponseGetCode, Payload, read_json_from_file_captcha, ApiCaptchaResponse, DoxBinAccount, DoxBinAccountSession, DoxBinAccountGetXsrf, ResponseParsing, LinkManager, ModeSubscribeOnPastes, ModeComment, ModeChange, ParameterComment, ParameterCommentAccount, ParameterCommentAccountUseExist};
+use super::enums::{ApiCaptchaResponseGetCode, Payload, read_json_from_file_captcha,
+                   ApiCaptchaResponse, DoxBinAccount, DoxBinAccountSession, DoxBinAccountGetXsrf, ResponseParsing,
+                   LinkManager, ModeSubscribeOnPastes, ModeComment, ModeChange, ParameterComment, ParameterCommentAccount,
+                   ParameterCommentAccountUseExist, ResponseChannel};
 use super::config::{generate_password, generate_username};
 use dotenv::dotenv;
 use std::env;
@@ -19,6 +22,8 @@ use regex::Regex;
 use scraper::{Html, Selector};
 use super::proxy::SProxies;
 use tokio::runtime::Runtime;
+use tokio::sync::mpsc;
+
 
 pub struct DoxbinAccount {
     client: Arc<Client>,
@@ -425,7 +430,7 @@ impl DoxbinAccount {
         }
         None
     }
-    pub async fn subscribe_on_pastes(&mut self, mode: ModeSubscribeOnPastes) {
+    pub async fn subscribe_on_pastes(&mut self, mode: ModeSubscribeOnPastes, sender: mpsc::Sender<ResponseChannel>) {
         let mut manager = LinkManager::new();
         manager.read_from_file("./parsing.txt").ok();
         for iter in 1..15000 {
@@ -459,11 +464,11 @@ impl DoxbinAccount {
                     if manager.add_link(link.clone()) {
                         count_add += 1;
                         writeln!(file, "{}_;_{}_;_{}", id, user.clone(), link.clone()).expect("REASON");
-                        // if let ModeSubscribeOnPastes::Comment { text,  mode_comment, anon} = mode.clone() {
-                        //     if let Some(()) = self.paste(mode_comment, ParameterComment{username: user, link, parameter_account: ParameterCommentAccount::Anon, text}).await {
-                        //         println!("Comment success")
-                        //     }
-                        // }
+                        if let ModeSubscribeOnPastes::Comment { text,  mode_comment, anon} = mode.clone() {
+                            if sender.send(ResponseChannel{link, username: user}).await.is_err() {
+                                println!("error send message in channel");
+                            }
+                        }
                     }
                 }
             }

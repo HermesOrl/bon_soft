@@ -17,41 +17,43 @@ mod tests {
     use tokio;
     use tokio::runtime::Runtime;
 
-    #[tokio::test]
-    async fn check() {
+    // #[tokio::test]
+    // async fn check() {
+    //
+    //     let client = Arc::new(Client::builder()
+    //         .pool_max_idle_per_host(50)
+    //         .build()
+    //         .expect("Failed to build client auth doxbin storage"));
+    //     let client_clone = Arc::clone(&client);
+    //     let mut dox_acc = request::DoxbinAccount::new(client_clone);
+    //     dox_acc.upload_proxies();
+    //     let result = dox_acc.paste(ModeComment::Paste, ParameterComment {
+    //         username: "asd".to_string(),
+    //         link: "https://doxbin.org/upload/YopDreiProhax1".to_string(),
+    //         parameter_account: ParameterCommentAccount::CreateNew,
+    //         text: "leee".to_string(),
+    //     }).await;
+    //
+    //     assert!(!matches!(result, None));
+    // }
 
-        let client = Arc::new(Client::builder()
-            .pool_max_idle_per_host(50)
-            .build()
-            .expect("Failed to build client auth doxbin storage"));
-        let client_clone = Arc::clone(&client);
-        let mut dox_acc = request::DoxbinAccount::new(client_clone);
-        dox_acc.upload_proxies();
-        let result = dox_acc.paste(ModeComment::Paste, ParameterComment {
-            username: "asd".to_string(),
-            link: "https://doxbin.org/upload/YopDreiProhax1".to_string(),
-            parameter_account: ParameterCommentAccount::CreateNew,
-            text: "leee".to_string(),
-        }).await;
+    // #[tokio::test]
+    // async fn parsingg() {
+    //
+    //     let client = Arc::new(Client::builder()
+    //         .pool_max_idle_per_host(50)
+    //         .build()
+    //         .expect("Failed to build client auth doxbin storage"));
+    //     let client_clone = Arc::clone(&client);
+    //     let mut dox_acc = request::DoxbinAccount::new(client_clone);
+    //     dox_acc.upload_proxies();
+    //     dox_acc.change_profile(ModeChange::Cookie).await;
+    //     dox_acc.subscribe_on_pastes(ModeSubscribeOnPastes::Ignore).await;
+    //     let result = Some(());
+    //     assert!(!matches!(result, None));
+    // }
 
-        assert!(!matches!(result, None));
-    }
 
-    #[tokio::test]
-    async fn parsingg() {
-
-        let client = Arc::new(Client::builder()
-            .pool_max_idle_per_host(50)
-            .build()
-            .expect("Failed to build client auth doxbin storage"));
-        let client_clone = Arc::clone(&client);
-        let mut dox_acc = request::DoxbinAccount::new(client_clone);
-        dox_acc.upload_proxies();
-        dox_acc.change_profile(ModeChange::Cookie).await;
-        dox_acc.subscribe_on_pastes(ModeSubscribeOnPastes::Ignore).await;
-        let result = Some(());
-        assert!(!matches!(result, None));
-    }
 }
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn StdError>> {

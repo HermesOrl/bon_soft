@@ -169,3 +169,7 @@ pub enum ModeChange {
     Proxy,
     All
 }
+pub struct ResponseChannel {
+    pub link: String,
+    pub username: String,
+}
