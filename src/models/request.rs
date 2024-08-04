@@ -10,7 +10,7 @@ use super::{request, XSRF_TOKEN_LINKS};
 use super::enums::{ApiCaptchaResponseGetCode, Payload, read_json_from_file_captcha,
                    ApiCaptchaResponse, DoxBinAccount, DoxBinAccountSession, DoxBinAccountGetXsrf, ResponseParsing,
                    LinkManager, ModeSubscribeOnPastes, ModeComment, ModeChange, ParameterComment, ParameterCommentAccount,
-                   ParameterCommentAccountUseExist, ResponseChannel};
+                   ParameterCommentAccountUseExist, ResponseChannel, ResponseChannelInfo};
 use super::config::{generate_password, generate_username};
 use dotenv::dotenv;
 use std::env;
@@ -469,7 +469,8 @@ impl DoxbinAccount {
                     if manager.add_link(data.link.clone()) {
                         count_add += 1;
                         if let ModeSubscribeOnPastes::Comment { text, mode_comment, anon } = mode.clone() {
-                            if sender.send(ResponseChannel { link: data.link.clone(), username: data.user.clone() }).await.is_err() {
+
+                            if sender.send(ResponseChannel::Success{data: ResponseChannelInfo {link: data.link.clone(), username: data.user.clone() }}).await.is_err() {
                                 println!("error send message in channel");
                             }
                         }

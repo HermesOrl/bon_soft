@@ -170,7 +170,13 @@ pub enum ModeChange {
     All
 }
 #[derive(Debug)]
-pub struct ResponseChannel {
+pub enum ResponseChannel {
+    Success { data: ResponseChannelInfo },
+    Fail
+}
+
+#[derive(Debug)]
+pub struct ResponseChannelInfo {
     pub link: String,
     pub username: String,
 }
