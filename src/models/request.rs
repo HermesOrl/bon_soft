@@ -400,6 +400,8 @@ impl DoxbinAccount {
         }
         None
     }
+
+
     pub async fn paste(&mut self, mode_paste: ModeComment, parameters_comment: ParameterComment) -> Option<()> {
         match parameters_comment.parameter_account {
             ParameterCommentAccount::CreateNew => {
@@ -418,7 +420,7 @@ impl DoxbinAccount {
                 }
             }
             ParameterCommentAccount::Anon => {
-                self.change_profile(ModeChange::Cookie)?
+                self.change_profile(ModeChange::Cookie).await?
             }
         }
         match mode_paste {
@@ -430,42 +432,44 @@ impl DoxbinAccount {
         }
         None
     }
+
+    fn parse_html(&self, html: &str) -> Vec<LinkData> {
+        let mut link_data = Vec::new();
+        let document = Html::parse_document(html);
+        let tbody_selector = Selector::parse("tbody").unwrap();
+        let tr_selector = Selector::parse("tr.doxentry").unwrap();
+        let a_selector = Selector::parse("a").unwrap();
+        let user_selector = Selector::parse("a.dox-username").unwrap();
+
+        let tbodies = document.select(&tbody_selector).collect::<Vec<_>>();
+        if tbodies.len() < 2 {
+            return link_data;
+        }
+
+        for element in tbodies[1].select(&tr_selector) {
+            let link_elem = element.select(&a_selector).next().unwrap();
+            let link = link_elem.value().attr("href").unwrap_or_default().to_string();
+            let user_elem = element.select(&user_selector).next();
+            let user = user_elem.map_or(String::from("Unknown"), |e| e.inner_html().trim().to_string());
+            let id = element.value().attr("id").unwrap_or_default().to_string();
+
+            link_data.push(LinkData { id, user, link });
+        }
+
+        link_data
+    }
     pub async fn subscribe_on_pastes(&mut self, mode: ModeSubscribeOnPastes, sender: mpsc::Sender<ResponseChannel>) {
         let mut manager = LinkManager::new();
         manager.read_from_file("./parsing.txt").ok();
-        for iter in 1..15000 {
+        for iter in 1..10000 {
             let mut count_add = 0;
-            if let Ok((status_code, html)) = self.get(&"https://doxbin.org/?page=1").await {
-                let document = Html::parse_document(&html);
-                let tbody_selector = Selector::parse("tbody").unwrap();
-                let tr_selector = Selector::parse("tr.doxentry").unwrap();
-                let a_selector = Selector::parse("a").unwrap();
-                let user_selector = Selector::parse("a.dox-username").unwrap();
-
-                let tbodies = document.select(&tbody_selector).collect::<Vec<_>>();
-                if tbodies.len() < 2 {
-                    continue
-                }
-
-                let mut file = OpenOptions::new()
-                    .write(true)
-                    .create(true)
-                    .append(true)
-                    .open("parsing.txt")
-                    .expect("Unable to open file");
-                for element in tbodies[1].select(&tr_selector) {
-                    let link_elem = element.select(&a_selector).next().unwrap();
-                    let link = link_elem.value().attr("href").unwrap_or_default().to_string();
-                    // println!("Iter: {}", iter);
-
-                    let user_elem = element.select(&user_selector).next();
-                    let user = user_elem.map_or(String::from("Unknown"), |e| e.inner_html().trim().to_string());
-                    let id = element.value().attr("id").unwrap_or_default().to_string();
-                    if manager.add_link(link.clone()) {
+            if let Ok((status_code, html)) = self.get(&"http://doxbin.org/?page=1").await {
+                let link_data = self.parse_html(&html);
+                for data in link_data {
+                    if manager.add_link(data.link.clone()) {
                         count_add += 1;
-                        writeln!(file, "{}_;_{}_;_{}", id, user.clone(), link.clone()).expect("REASON");
-                        if let ModeSubscribeOnPastes::Comment { text,  mode_comment, anon} = mode.clone() {
-                            if sender.send(ResponseChannel{link, username: user}).await.is_err() {
+                        if let ModeSubscribeOnPastes::Comment { text, mode_comment, anon } = mode.clone() {
+                            if sender.send(ResponseChannel { link: data.link.clone(), username: data.user.clone() }).await.is_err() {
                                 println!("error send message in channel");
                             }
                         }
@@ -478,6 +482,13 @@ impl DoxbinAccount {
     }
 
 }
+
+struct LinkData {
+    id: String,
+    user: String,
+    link: String,
+}
+
 fn read_json_from_file<P: AsRef<Path>>(path: P) -> Result<Value, Box<dyn StdError>> {
     let data = fs::read_to_string(path)?;
     let json: Value = serde_json::from_str(&data)?;

@@ -37,21 +37,33 @@ mod tests {
     //     assert!(!matches!(result, None));
     // }
 
-    // #[tokio::test]
-    // async fn parsingg() {
-    //
-    //     let client = Arc::new(Client::builder()
-    //         .pool_max_idle_per_host(50)
-    //         .build()
-    //         .expect("Failed to build client auth doxbin storage"));
-    //     let client_clone = Arc::clone(&client);
-    //     let mut dox_acc = request::DoxbinAccount::new(client_clone);
-    //     dox_acc.upload_proxies();
-    //     dox_acc.change_profile(ModeChange::Cookie).await;
-    //     dox_acc.subscribe_on_pastes(ModeSubscribeOnPastes::Ignore).await;
-    //     let result = Some(());
-    //     assert!(!matches!(result, None));
-    // }
+    #[tokio::test]
+    async fn parsingg() {
+        let (tx, mut rx) = mpsc::channel(150);
+        tokio::spawn(async move {
+            let client = Arc::new(Client::builder()
+                .pool_max_idle_per_host(50)
+                .build()
+                .expect("Failed to build client auth doxbin storage"));
+            let client_clone = Arc::clone(&client);
+            let mut dox_acc = request::DoxbinAccount::new(client_clone);
+            dox_acc.upload_proxies();
+            dox_acc.change_profile(ModeChange::Cookie).await;
+            dox_acc.subscribe_on_pastes(ModeSubscribeOnPastes::Comment {
+                text: "".to_string(),
+                mode_comment: ModeComment::Paste,
+                anon: false,
+            }, tx).await;
+        });
+        while let Some(response) = rx.recv().await {
+            println!("Received: {:?}", response);
+        }
+        // if let Some(result) = rx.recv().await {
+        //     println!("Результат из асинхронной функции: {:?}", result);
+        //     let res = Some(());
+        //     assert!(!matches!(res, None));
+        // }
+    }
 
 
 }
