@@ -475,7 +475,6 @@ impl DoxbinAccount {
                             if sender.send(ResponseChannel::Sending{data: ResponseChannelInfo {link: data.link.clone(), username: data.user.clone() }}).await.is_err() {
                                 println!("error send message in channel");
                             }
-                            println!("send");
                         }
                     }
                 }

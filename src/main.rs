@@ -17,59 +17,6 @@ mod tests {
     use crate::models::enums::{ModeChange, ParameterComment, ParameterCommentAccount};
     use super::*;
     use tokio;
-    use tokio::runtime::Runtime;
-    // #[tokio::test]
-    // async fn parsingg() {
-    //     let (tx, mut rx) = mpsc::channel(150);
-    //     tokio::spawn(async move {
-    //         let client = Arc::new(Client::builder()
-    //             .pool_max_idle_per_host(50)
-    //             .build()
-    //             .expect("Failed to build client auth doxbin storage"));
-    //         let client_clone = Arc::clone(&client);
-    //         let mut dox_acc = request::DoxbinAccount::new(client_clone);
-    //         dox_acc.upload_proxies();
-    //         dox_acc.change_profile(ModeChange::Cookie).await;
-    //         dox_acc.subscribe_on_pastes(ModeSubscribeOnPastes::Comment {
-    //             text: "".to_string(),
-    //             mode_comment: ModeComment::Paste,
-    //             anon: false,
-    //         }, tx).await;
-    //     });
-    //     let mut handles = vec![];
-    //     while let Some(response) = rx.recv().await {
-    //        if let ResponseChannel::Sending {data} = response {
-    //            let client = Arc::new(Client::builder()
-    //                .pool_max_idle_per_host(50)
-    //                .build()
-    //                .expect("Failed to build client"));
-    //            let client_clone = Arc::clone(&client);
-    //            let handle = task::spawn(async move {
-    //                let mut dox_acc = request::DoxbinAccount::new(client_clone);
-    //                dox_acc.change_profile(ModeChange::Cookie).await;
-    //                dox_acc.paste(ModeComment::Paste,
-    //                              ParameterComment {
-    //                                  username: data.username, link: data.link,
-    //                                  parameter_account: ParameterCommentAccount::UseExist
-    //                                  {
-    //                                      exist_type: ParameterCommentAccountUseExist::ExistAnon
-    //                                  },
-    //                                  text: "check".to_string()
-    //                              }).await
-    //            });
-    //            handles.push(handle);
-    //        }
-    //     }
-    //
-    //     for handle in handles {
-    //         handle.await;
-    //     }
-    // }
-    
-    async fn receiver_messages(handles: &mut Vec<thread::JoinHandle<()>>) {
-        
-    }
-    
     #[tokio::test]
     async fn tttd() {
         let mut message_count = 0;
@@ -100,17 +47,6 @@ mod tests {
                     let client_clone = Arc::clone(&client);
                     let mut dox_acc = request::DoxbinAccount::new(client_clone);
                     dox_acc.change_profile(ModeChange::Cookie).await;
-                    // let resultt = dox_acc.paste(ModeComment::Paste,
-                    //               ParameterComment {
-                    //                   username: data.username,
-                    //                   link: data.link,
-                    //                   parameter_account: ParameterCommentAccount::UseExist
-                    //                   {
-                    //                       exist_type: ParameterCommentAccountUseExist::ExistAnon
-                    //                   },
-                    //                   text: "check".to_string()
-                    //               }).await;
-
                     if let Some(value) = dox_acc.paste(ModeComment::Paste,
        ParameterComment {
                            username: data.username,
