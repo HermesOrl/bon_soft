@@ -143,6 +143,7 @@ impl DoxbinAccount {
             }
         }
         let rtrn =( response.status().as_u16() as usize, response.text().await?);
+        // println!("{:?}", rtrn);
         Ok(rtrn)
     }
     async fn post(&self, url: &str, body: &Value) -> Result<(usize, String, String), Error> {
@@ -369,18 +370,16 @@ impl DoxbinAccount {
         }
         None
     }
-    async fn comment_paste(&mut self, link: String, message_paste: String) -> Option<()>{
+    async fn comment_paste(&mut self, link: String, message_paste: String) -> Option<String>{
         if let Ok((status_code, text)) = self.get(&link).await {
             let re = Regex::new(r#"<input type="hidden" name="_token" value="([^"]+)""#).expect("Failed to create regex");
             if let Some(captures) = re.captures(&text) {
                 if let Some(value) = captures.get(1) {
                     let _token = value.as_str();
                     let _code = self.captcha_client.get_token().await?;
-                    println!("{}", _code);
                     let doxid = text.split("doxid = ")
                         .nth(1)
                         .and_then(|s| s.split(";").next())?;
-                    println!("doxid: {}", doxid);
                     let payload_json = json!({
                         "doxId": doxid,
                         "name": "Anonymous",
@@ -392,7 +391,7 @@ impl DoxbinAccount {
                         println!("{}", response_html);
                         println!("status code create paste: {}", status_code);
                         if let cont = response_html.contains("\"status\":\"done\"") {
-                            return Some(())
+                            return Some(format!("Create paste: {}", link.clone()).to_string())
                         }
                     }
                 }
@@ -401,8 +400,7 @@ impl DoxbinAccount {
         None
     }
 
-
-    pub async fn paste(&mut self, mode_paste: ModeComment, parameters_comment: ParameterComment) -> Option<()> {
+    pub async fn paste(&mut self, mode_paste: ModeComment, parameters_comment: ParameterComment) -> Option<String> {
         match parameters_comment.parameter_account {
             ParameterCommentAccount::CreateNew => {
                 if let Some((username, password, session_str)) = self.create_account().await {
@@ -412,10 +410,10 @@ impl DoxbinAccount {
             ParameterCommentAccount::UseExist {exist_type} => {
                 match exist_type {
                     ParameterCommentAccountUseExist::ExistAnon  => {
-                        self.check_xsrf_token();
+                        self.check_xsrf_token()?;
                     }
                     ParameterCommentAccountUseExist::ExistReg => {
-                        self.check_session_token();
+                        self.check_session_token()?;
                     }
                 }
             }
@@ -461,29 +459,48 @@ impl DoxbinAccount {
     pub async fn subscribe_on_pastes(&mut self, mode: ModeSubscribeOnPastes, sender: mpsc::Sender<ResponseChannel>) {
         let mut manager = LinkManager::new();
         manager.read_from_file("./parsing.txt").ok();
-        for iter in 1..10000 {
+        let mut htmll = "s".to_string();
+        for iter in 1..2 {
             let mut count_add = 0;
-            if let Ok((status_code, html)) = self.get(&"http://doxbin.org/?page=1").await {
+            if let Ok((status_code, html)) = self.get(&format!("https://doxbin.org/?page={}", iter)).await {
+                htmll = html.clone();
                 let link_data = self.parse_html(&html);
                 for data in link_data {
+                    if count_add >= 5 {
+                        break
+                    }
                     if manager.add_link(data.link.clone()) {
                         count_add += 1;
                         if let ModeSubscribeOnPastes::Comment { text, mode_comment, anon } = mode.clone() {
-
-                            if sender.send(ResponseChannel::Success{data: ResponseChannelInfo {link: data.link.clone(), username: data.user.clone() }}).await.is_err() {
+                            if sender.send(ResponseChannel::Sending{data: ResponseChannelInfo {link: data.link.clone(), username: data.user.clone() }}).await.is_err() {
                                 println!("error send message in channel");
                             }
+                            println!("send");
                         }
                     }
                 }
             }
             println!("Add {} users. Sleeping....", count_add);
-            sleep(Duration::from_secs(50)).await;
+            if count_add == 0 {
+                if htmll.contains("<title>Doxbin | Checking Browser</title>") {
+                    println!("bad browser");
+                }
+
+            }
+            sleep(Duration::from_secs(2)).await;
         }
     }
 
+    pub async fn ttt(&mut self,sender: mpsc::Sender<ResponseChannel>) {
+        if sender.send(ResponseChannel::Sending { data: ResponseChannelInfo { link: "asd".to_string(), username: "asd".to_string() } }).await.is_err() {
+            println!("error send message in channel");
+        }
+    }
+
+
 }
 
+#[derive(Debug)]
 struct LinkData {
     id: String,
     user: String,

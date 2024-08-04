@@ -120,9 +120,7 @@ impl LinkManager {
         Ok(())
     }
     pub fn add_link(&mut self, link: String) -> bool {
-        // for linkkk in self.links.clone() {
-        //     println!("{}", linkkk)
-        // }
+
         if self.links.contains(&link) {
             false
         } else {
@@ -171,6 +169,7 @@ pub enum ModeChange {
 }
 #[derive(Debug)]
 pub enum ResponseChannel {
+    Sending { data: ResponseChannelInfo },
     Success { data: ResponseChannelInfo },
     Fail
 }
