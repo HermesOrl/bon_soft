@@ -113,8 +113,8 @@ impl LinkManager {
             let line = line?;
             let parts: Vec<&str> = line.split("_;_").collect();
             // println!("{:?}", parts);
-            if parts.len() == 3 {
-                self.links.insert(parts[2].to_string());
+            if parts.len() == 2 {
+                self.links.insert(parts[1].to_string());
             }
         }
         Ok(())
@@ -130,12 +130,7 @@ impl LinkManager {
     }
 }
 
-#[derive(Clone)]
-pub enum ModeComment {
-    Paste,
-    Profile,
-    PasteAndProfile,
-}
+
 
 pub enum ParameterCommentAccountUseExist {
     ExistReg,
@@ -155,6 +150,13 @@ pub struct ParameterComment {
     pub text: String
 }
 
+
+#[derive(Clone)]
+pub enum ModeComment {
+    Paste,
+    Profile,
+    PasteAndProfile,
+}
 #[derive(Clone)]
 pub enum ModeSubscribeOnPastes{
     Ignore,

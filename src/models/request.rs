@@ -23,6 +23,7 @@ use scraper::{Html, Selector};
 use super::proxy::SProxies;
 use tokio::runtime::Runtime;
 use tokio::sync::mpsc;
+use tokio::sync::Mutex as TokioMutex;
 
 
 pub struct DoxbinAccount {
@@ -370,8 +371,8 @@ impl DoxbinAccount {
         }
         None
     }
-    async fn comment_paste(&mut self, link: String, message_paste: String) -> Option<String>{
-        if let Ok((status_code, text)) = self.get(&link).await {
+    async fn comment_paste(&mut self, parameters_comment: ParameterComment) -> Option<()>{
+        if let Ok((status_code, text)) = self.get(&parameters_comment.link).await {
             let re = Regex::new(r#"<input type="hidden" name="_token" value="([^"]+)""#).expect("Failed to create regex");
             if let Some(captures) = re.captures(&text) {
                 if let Some(value) = captures.get(1) {
@@ -383,7 +384,7 @@ impl DoxbinAccount {
                     let payload_json = json!({
                         "doxId": doxid,
                         "name": "Anonymous",
-                        "comment": message_paste,
+                        "comment": parameters_comment.text,
                         "_token": _token,
                         "hcaptcha_token": _code,
                     });
@@ -391,7 +392,7 @@ impl DoxbinAccount {
                         println!("{}", response_html);
                         println!("status code create paste: {}", status_code);
                         if let cont = response_html.contains("\"status\":\"done\"") {
-                            return Some(format!("Create paste: {}", link.clone()).to_string())
+                            return Some(())
                         }
                     }
                 }
@@ -400,8 +401,8 @@ impl DoxbinAccount {
         None
     }
 
-    pub async fn paste(&mut self, mode_paste: ModeComment, parameters_comment: ParameterComment) -> Option<String> {
-        match parameters_comment.parameter_account {
+    pub async fn paste(&mut self, mode_paste: ModeComment, parameters_comment: ParameterComment) -> Option<()> {
+        match &parameters_comment.parameter_account {
             ParameterCommentAccount::CreateNew => {
                 if let Some((username, password, session_str)) = self.create_account().await {
                     println!("Log print\t{}:{}|{}", username, password, session_str);
@@ -423,7 +424,7 @@ impl DoxbinAccount {
         }
         match mode_paste {
             ModeComment::Paste => {
-                return self.comment_paste(parameters_comment.link, parameters_comment.text).await;
+                return self.comment_paste(parameters_comment).await;
             },
             ModeComment::Profile => {},
             ModeComment::PasteAndProfile => {},
@@ -456,9 +457,7 @@ impl DoxbinAccount {
 
         link_data
     }
-    pub async fn subscribe_on_pastes(&mut self, mode: ModeSubscribeOnPastes, sender: mpsc::Sender<ResponseChannel>) {
-        let mut manager = LinkManager::new();
-        manager.read_from_file("./parsing.txt").ok();
+    pub async fn subscribe_on_pastes(&mut self, mode: ModeSubscribeOnPastes, sender: mpsc::Sender<ResponseChannel>, link_manager: Arc<TokioMutex<LinkManager>>) {
         let mut htmll = "s".to_string();
         for iter in 1..2 {
             let mut count_add = 0;
@@ -469,6 +468,7 @@ impl DoxbinAccount {
                     if count_add >= 5 {
                         break
                     }
+                    let mut manager = link_manager.lock().await;
                     if manager.add_link(data.link.clone()) {
                         count_add += 1;
                         if let ModeSubscribeOnPastes::Comment { text, mode_comment, anon } = mode.clone() {
