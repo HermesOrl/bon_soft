@@ -24,6 +24,7 @@ use super::proxy::SProxies;
 use tokio::runtime::Runtime;
 use tokio::sync::mpsc;
 use tokio::sync::Mutex as TokioMutex;
+use tokio::sync::Barrier;
 
 
 pub struct DoxbinAccount {
@@ -31,7 +32,8 @@ pub struct DoxbinAccount {
     cookie_jar: Arc<Mutex<CookieJar>>,
     headers: HeaderMap,
     captcha_client: Captcha,
-    proxy_manager: SProxies,
+    proxy_manager: Arc<Mutex<SProxies>>,
+    current_proxy: String,
 }
 
 pub struct DoxbinAccountStorage {
@@ -95,21 +97,41 @@ impl DoxbinAccountStorage {
             .pool_max_idle_per_host(50)
             .build()
             .expect("Failed to build client auth doxbin storage"));
+
+
+        // TODO: WARNING, PROXY DONT WORK !!!
+        // TODO: WARNING, PROXY DONT WORK !!!
+
+
+        // TODO: WARNING, PROXY DONT WORK !!!
         let client_clone = Arc::clone(&client);
-        let mut dox_acc = request::DoxbinAccount::new(client_clone);
+        // TODO: WARNING, PROXY DONT WORK !!!
+        let proxy_manager = Arc::new(Mutex::new(SProxies::new()));
+        // TODO: WARNING, PROXY DONT WORK !!!
+        let mut proxy_manager_clone = Arc::clone(&proxy_manager);
+        // TODO: WARNING, PROXY DONT WORK !!!
+        let mut dox_acc = request::DoxbinAccount::new(client_clone, proxy_manager_clone);
+        // TODO: WARNING, PROXY DONT WORK !!!
+
+
+        // TODO: WARNING, PROXY DONT WORK !!!
+        // TODO: WARNING, PROXY DONT WORK !!!
+
+
         dox_acc.generate_xsrf_token(DoxBinAccountGetXsrf::ExistAccount {session }).await.unwrap()
     }
 }
 
 impl DoxbinAccount {
 
-    pub fn new(client: Arc<Client>) -> Self {
+    pub fn new(client: Arc<Client>, proxy_manager: Arc<Mutex<SProxies>>) -> Self {
         DoxbinAccount {
             client,
             headers: HeaderMap::new(),
             cookie_jar: Arc::new(Mutex::new(CookieJar::new())),
             captcha_client: Captcha::new(),
-            proxy_manager: SProxies::new(),
+            proxy_manager,
+            current_proxy: String::new(),
         }
     }
     fn get_cookie_header(&self, url: &str) -> Option<String> {
@@ -314,7 +336,8 @@ impl DoxbinAccount {
         return Some(results)
     }
     pub fn upload_proxies(&mut self) -> Option<()> {
-        self.proxy_manager.add_from_file("./proxies.txt").expect("TODO: failed upload proxies");
+        let mut mut_proxy_manager = self.proxy_manager.lock().unwrap();
+        mut_proxy_manager.add_from_file("./proxies.txt").expect("TODO: failed upload proxies");
         return Some(())
     }
     fn clear_cookies(&mut self) -> Option<()> {
@@ -324,19 +347,20 @@ impl DoxbinAccount {
     }
     async fn change_cookies(&mut self) -> Option<()> {
         self.clear_cookies();
-        if let Some(()) = self.generate_xsrf_token(DoxBinAccountGetXsrf::NewAccount).await {
-            return Some(())
-        }
-        None
+        return self.generate_xsrf_token(DoxBinAccountGetXsrf::NewAccount).await;
     }
     fn change_proxy(&mut self) -> Option<()> {
-        match self.proxy_manager.get_next_proxy() {
+        let mut mut_proxy_manager = self.proxy_manager.lock().unwrap();
+
+        match mut_proxy_manager.get_next_proxy() {
             Ok(proxy_sproxy) => {
+                self.current_proxy = proxy_sproxy.proxy_url.clone();
                 let new_client = Arc::new(Client::builder()
-                    .proxy(Proxy::all(&proxy_sproxy.proxy_url).ok()?)
+                    .proxy(Proxy::all(&proxy_sproxy.proxy_url.clone()).ok()?)
                     .build()
                     .expect("Failed to build client in change_proxy"));
                 self.client = new_client;
+                println!("New proxy: {}", proxy_sproxy.proxy_url.clone());
                 return Some(());
             }
             Err(e) => {eprintln!("Failed get next proxy {}", e)}
@@ -365,18 +389,21 @@ impl DoxbinAccount {
             },
             ModeChange::All => {
                 if let Some(()) = self.change_proxy() {
-                    return self.change_cookies().await
+                    let result_change_cookie = self.change_cookies().await;
+                    return result_change_cookie;
                 }
             },
         }
         None
     }
-    async fn comment_paste(&mut self, parameters_comment: ParameterComment) -> Option<()>{
+    async fn comment_paste(&mut self, parameters_comment: ParameterComment, barrier: Arc<Barrier>) -> Option<()>{
         if let Ok((status_code, text)) = self.get(&parameters_comment.link).await {
             let re = Regex::new(r#"<input type="hidden" name="_token" value="([^"]+)""#).expect("Failed to create regex");
             if let Some(captures) = re.captures(&text) {
                 if let Some(value) = captures.get(1) {
                     let _token = value.as_str();
+                    barrier.wait().await;
+                    println!("attempt get captcha token");
                     let _code = self.captcha_client.get_token().await?;
                     let doxid = text.split("doxid = ")
                         .nth(1)
@@ -388,10 +415,10 @@ impl DoxbinAccount {
                         "_token": _token,
                         "hcaptcha_token": _code,
                     });
+                    println!("attempt start paste");
                     if let Ok((status_code, _, response_html)) = self.post(&"https://doxbin.org/comment", &payload_json).await {
-                        println!("{}", response_html);
-                        println!("status code create paste: {}", status_code);
-                        if let cont = response_html.contains("\"status\":\"done\"") {
+                        println!("status code create paste: {}\t\tProxy: {}", status_code, self.current_proxy);
+                        if response_html.contains("\"status\":\"done\"") && status_code == 200 {
                             return Some(())
                         }
                     }
@@ -401,7 +428,7 @@ impl DoxbinAccount {
         None
     }
 
-    pub async fn paste(&mut self, mode_paste: ModeComment, parameters_comment: ParameterComment) -> Option<()> {
+    pub async fn paste(&mut self, mode_paste: ModeComment, parameters_comment: ParameterComment, barrier: Arc<Barrier>) -> Option<()> {
         match &parameters_comment.parameter_account {
             ParameterCommentAccount::CreateNew => {
                 if let Some((username, password, session_str)) = self.create_account().await {
@@ -422,9 +449,11 @@ impl DoxbinAccount {
                 self.change_profile(ModeChange::Cookie).await?
             }
         }
+        barrier.wait().await;
+        println!("start function comment");
         match mode_paste {
             ModeComment::Paste => {
-                return self.comment_paste(parameters_comment).await;
+                return self.comment_paste(parameters_comment, barrier).await;
             },
             ModeComment::Profile => {},
             ModeComment::PasteAndProfile => {},
@@ -458,14 +487,14 @@ impl DoxbinAccount {
         link_data
     }
     pub async fn subscribe_on_pastes(&mut self, mode: ModeSubscribeOnPastes, sender: mpsc::Sender<ResponseChannel>, link_manager: Arc<TokioMutex<LinkManager>>) {
-        let mut htmll = "s".to_string();
+        let mut htmll = String::new();
         for iter in 1..2 {
             let mut count_add = 0;
             if let Ok((status_code, html)) = self.get(&format!("https://doxbin.org/?page={}", iter)).await {
                 htmll = html.clone();
                 let link_data = self.parse_html(&html);
                 for data in link_data {
-                    if count_add >= 5 {
+                    if count_add >= 10 {
                         break
                     }
                     let mut manager = link_manager.lock().await;
@@ -486,8 +515,9 @@ impl DoxbinAccount {
                 }
 
             }
-            sleep(Duration::from_secs(2)).await;
+            sleep(Duration::from_secs(10)).await;
         }
+        drop(sender)
     }
 
     pub async fn ttt(&mut self,sender: mpsc::Sender<ResponseChannel>) {
@@ -591,7 +621,6 @@ impl Captcha {
             .await.expect("TODO: Captcha create panic");
         match response.json::<ApiCaptchaResponse>().await {
             Ok(response_json) => {
-                println!("{:?}", response_json.taskId);
                 if let Some(_code_captcha) = self.get_code(response_json.taskId as usize).await {
                     // println!("{:?}", _code_captcha);
                     return Some(_code_captcha);

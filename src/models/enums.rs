@@ -128,6 +128,12 @@ impl LinkManager {
             true
         }
     }
+
+    pub fn readread(& self) {
+        for i in self.links.clone() {
+            println!("I: {}", i)
+        }
+    }
 }
 
 

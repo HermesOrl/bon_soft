@@ -3,7 +3,6 @@ use std::io;
 use std::io::BufRead;
 use std::path::Path;
 
-
 #[derive(Debug, Clone)]
 enum ProxyType {
     Http,
@@ -36,11 +35,32 @@ pub struct SProxies {
 
 impl SProxies {
     pub fn new() -> SProxies {
-        SProxies {
-            proxies: Vec::new()
-        }
+        let mut s_proxies = SProxies {
+            proxies: Vec::new(),
+        };
+        // Заполняем прокси из файла
+        s_proxies.add_from_file("./proxies.txt");
+        s_proxies
     }
+    pub fn add_from_file(&mut self, file_path: &str) -> io::Result<()> {
+        let path = Path::new(file_path);
+        let file = File::open(&path)?;
+        let reader = io::BufReader::new(file);
 
+        for line in reader.lines() {
+            if let Ok(GLine) = line  {
+                match GLine.trim() {
+                    "" => continue,
+                    _ => {
+                        let result: (ProxyType, ProxyFormat) = self.check_proxy(GLine.clone());
+                        // println!("adding proxy for file: {}", GLine.clone());
+                        self.add_proxy(GLine, result.0, result.1);
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
     fn check_proxy(&self, proxy_line: String) -> (ProxyType, ProxyFormat) {
         use regex::Regex;
 
@@ -78,25 +98,6 @@ impl SProxies {
         Ok(())
     }
 
-    pub fn add_from_file(&mut self, file_path: &str) -> io::Result<()> {
-        let path = Path::new(file_path);
-        let file = File::open(&path)?;
-        let reader = io::BufReader::new(file);
-
-        for line in reader.lines() {
-            if let Ok(GLine) = line  {
-                match GLine.trim() {
-                    "" => continue,
-                    _ => {
-                        let result: (ProxyType, ProxyFormat) = self.check_proxy(GLine.clone());
-                        // println!("{:?}, {}", result, GLine.clone());
-                        self.add_proxy(GLine, result.0, result.1);
-                    }
-                }
-            }
-        }
-        Ok(())
-    }
     pub fn get_proxies(&self) -> Vec<SProxy> {
         self.proxies.clone()
     }
