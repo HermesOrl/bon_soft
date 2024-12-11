@@ -1,0 +1,8 @@
+{
+  "clientKey":"YOUR_API_KEY",
+  "task": {
+    "type":"HCaptchaTaskProxyless",
+    "websiteURL":"https://2captcha.com/demo/hcaptcha",
+    "websiteKey":"f7de0da3-3303-44e8-ab48-fa32ff8ccc7b"
+  }
+}
